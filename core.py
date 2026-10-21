@@ -162,9 +162,16 @@ async def roll_hero(bot: Bot, chat_id: int) -> tuple[int | None, bool]:
     winner_id, is_new = hero.pick_today(store, chat_id, today(), rng)
     if winner_id is not None and is_new:
         if store.settings(chat_id)["drumroll"]:
-            for line in rng.choice(raw("hero_drumroll", chat_tone(chat_id))):
-                await bot.send_message(chat_id, line)
+            # One message that grows line by line; the reveal stays separate so the winner gets pinged.
+            lines = rng.choice(raw("hero_drumroll", chat_tone(chat_id)))
+            drum = await bot.send_message(chat_id, lines[0])
+            for i in range(1, len(lines)):
                 await asyncio.sleep(1.5)
+                try:
+                    await bot.edit_message_text("\n".join(lines[: i + 1]), chat_id=chat_id, message_id=drum.message_id)
+                except TelegramAPIError:
+                    pass
+            await asyncio.sleep(1.5)
         reveal = tt(chat_id, "hero_reveal", rng, mention=winner_mention(chat_id, winner_id), **title_vars(chat_id))
         await bot.send_message(chat_id, reveal)
         await maybe_tie_poll(bot, chat_id)
@@ -210,6 +217,14 @@ def who_answer(chat_id: int, question: str) -> str | None:
     picked = rng.choice(members).user_id
     question = html.escape(question.strip().rstrip("?").strip()) or t("who_default")
     return tt(chat_id, "who_answer", rng, question=question, mention=winner_mention(chat_id, picked))
+
+
+def duel_call_text(chat_id: int, challenger: int, target: int | None) -> str:
+    """First line of a duel message; later events are appended below it, never replace it."""
+    me = winner_mention(chat_id, challenger)
+    if target:
+        return tt(chat_id, "duel_call", a=me, b=winner_mention(chat_id, target))
+    return tt(chat_id, "duel_open", a=me)
 
 
 def duel_outcome(challenger: int, opponent: int) -> tuple[int, int]:
@@ -285,8 +300,11 @@ def progress_bar(done: int | None, total: int | None, width: int = 10) -> str:
     return t("bar_full") * filled + t("bar_empty") * (width - filled)
 
 
-def render_status(phrase: str, stage: str, done: int | None = None, total: int | None = None) -> str:
-    lines = [html.escape(phrase), t(f"dl_stage_{stage}")]
+def render_status(
+    phrase: str, stage: str, done: int | None = None, total: int | None = None, passed: tuple = ()
+) -> str:
+    """Stages already passed stay as lines above the current one; only the progress line changes."""
+    lines = [html.escape(phrase)] + [t(f"dl_stage_{p}") for p in passed] + [t(f"dl_stage_{stage}")]
     if stage == "download" and done:
         if total:
             pct = min(100, done * 100 // total)
@@ -309,7 +327,7 @@ async def _ticker(bot: Bot, chat_id: int, message_id: int, phrase: str, state: d
     """Edits the status message from `state` (written by the worker thread) at most every STATUS_EVERY s."""
     while True:
         await asyncio.sleep(STATUS_EVERY)
-        text = render_status(phrase, *state["now"])
+        text = render_status(phrase, *state["now"], passed=tuple(state["passed"]))
         if text == shown[0]:
             continue
         try:
@@ -333,17 +351,19 @@ async def deliver_video(
     first = render_status(phrase, "queue")
     status = await bot.send_message(chat_id, first, reply_parameters=reply)
     store.remember(chat_id, status.message_id, "status", time.time())
-    state = {"now": ("queue", None, None)}
+    state = {"now": ("queue", None, None), "passed": []}
     shown = [first]
 
     def on_progress(stage: str, done: int | None, total: int | None) -> None:
+        if stage != state["now"][0]:
+            state["passed"].append(state["now"][0])
         state["now"] = (stage, done, total)
 
     workdir = Path(tempfile.mkdtemp(prefix="chatfun-"))
     ticker = asyncio.create_task(_ticker(bot, chat_id, status.message_id, phrase, state, shown))
     try:
         async with dl_slots:
-            state["now"] = ("probe", None, None)
+            on_progress("probe", None, None)
             try:
                 video = await asyncio.to_thread(
                     downloader.download, url, workdir, cfg.max_upload_bytes, cfg.max_duration,
@@ -369,7 +389,8 @@ async def deliver_video(
             ticker.cancel()
             try:
                 await bot.edit_message_text(
-                    render_status(phrase, "upload"), chat_id=chat_id, message_id=status.message_id
+                    render_status(phrase, "upload", passed=(*state["passed"], state["now"][0])),
+                    chat_id=chat_id, message_id=status.message_id,
                 )
             except TelegramAPIError:
                 pass
@@ -401,9 +422,11 @@ async def sweeper(bot: Bot) -> None:
         for chat_id, key, message_id, options in store.due_tie_polls(time.time()):
             await close_tie_poll(bot, chat_id, key, message_id, options)
         for duel_id, chat_id, message_id in store.stale_duels(time.time() - DUEL_TTL):
+            duel = store.duel(duel_id)
             if store.finish_duel(duel_id, "expired") and message_id:
+                text = duel_call_text(chat_id, duel["challenger"], duel["target"]) + "\n" + tt(chat_id, "duel_expired")
                 try:
-                    await bot.edit_message_text(tt(chat_id, "duel_expired"), chat_id=chat_id, message_id=message_id)
+                    await bot.edit_message_text(text, chat_id=chat_id, message_id=message_id)
                 except TelegramAPIError:
                     pass
         store.prune_messages(time.time())

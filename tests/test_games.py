@@ -116,7 +116,12 @@ def test_duel_buttons(env):
     asyncio.run(handlers.on_duel_button(accept, bot))
     duel = store.duel(targeted)
     assert duel["status"] == "done" and duel["winner"] in (1, 2) and len(accept.edits) == 2
-    assert all("tg://" not in e and "@" not in e for e in accept.edits)  # follow-ups do not ping
+    first, final = accept.edits
+    assert final.startswith(first) and final.count("\n") == first.count("\n") + 1  # lines are appended
+    call_line = first.split("\n")[0]
+    appended = final.split("\n")[1:]
+    assert len(appended) == 2 and all("tg://" not in x and "@" not in x for x in appended)  # follow-ups do not ping
+    assert "tg://" in call_line  # the original challenge line is kept
 
     late = FakeCallback(f"duel:{targeted}:accept", 2, "Bob")
     asyncio.run(handlers.on_duel_button(late, bot))

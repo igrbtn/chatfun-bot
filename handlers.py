@@ -25,6 +25,7 @@ from core import (
     chat_tone,
     deliver_video,
     display_name,
+    duel_call_text,
     duel_outcome,
     is_chat_admin,
     normalize_title,
@@ -40,7 +41,6 @@ from core import (
     today,
     tt,
     who_answer,
-    winner_mention,
 )
 from messages import TONES, raw, t
 
@@ -390,12 +390,7 @@ async def cmd_duel(message: Message, bot: Bot) -> None:
     if target_user:
         store.touch(chat_id, target, display_name(target_user), register=False, username=target_user.username)
     duel_id = store.create_duel(chat_id, challenger, target, time.time())
-    me = winner_mention(chat_id, challenger)
-    if target:
-        text = tt(chat_id, "duel_call", a=me, b=winner_mention(chat_id, target))
-    else:
-        text = tt(chat_id, "duel_open", a=me)
-    sent = await message.reply(text, reply_markup=duel_keyboard(duel_id))
+    sent = await message.reply(duel_call_text(chat_id, challenger, target), reply_markup=duel_keyboard(duel_id))
     store.set_duel_message(duel_id, sent.message_id)
 
 
@@ -413,6 +408,8 @@ async def on_duel_button(callback: CallbackQuery, bot: Bot) -> None:
     challenger, target = duel["challenger"], duel["target"]
     store.touch(chat_id, presser, display_name(callback.from_user), register=False,
                 username=callback.from_user.username)
+    # Every step is appended under the challenge as a new line: the whole story stays readable.
+    story = [duel_call_text(chat_id, challenger, target)]
 
     if action == "decline":
         if presser == challenger:
@@ -423,7 +420,8 @@ async def on_duel_button(callback: CallbackQuery, bot: Bot) -> None:
             await callback.answer(t("duel_not_you"))
             return
         if store.finish_duel(duel["id"], status):
-            await callback.message.edit_text(text)
+            story.append(text)
+            await callback.message.edit_text("\n".join(story))
         await callback.answer()
         return
 
@@ -441,10 +439,12 @@ async def on_duel_button(callback: CallbackQuery, bot: Bot) -> None:
     # The challenge already pinged both; the fight and result are follow-ups in the same thread.
     a, b = quiet_name(chat_id, challenger), quiet_name(chat_id, presser)
     try:
-        await callback.message.edit_text(tt(chat_id, "duel_fight", rng, a=a, b=b))
+        story.append(tt(chat_id, "duel_fight", rng, a=a, b=b))
+        await callback.message.edit_text("\n".join(story))
         await asyncio.sleep(1.5)
-        await callback.message.edit_text(tt(chat_id, "duel_result", rng, winner=quiet_name(chat_id, winner),
-                                           loser=quiet_name(chat_id, loser)))
+        story.append(tt(chat_id, "duel_result", rng, winner=quiet_name(chat_id, winner),
+                        loser=quiet_name(chat_id, loser)))
+        await callback.message.edit_text("\n".join(story))
     except TelegramAPIError:
         log.warning("duel %s result not shown", duel["id"])
 

@@ -74,3 +74,34 @@ def test_orphan_statuses_are_swept(env):
     assert store.orphan_statuses(now=2000.0) == 1
     assert store.due_for_delete(now=2000.0) == [(GROUP, 5)]
     assert store.prune_messages(now=1000.0 + 49 * 3600) == 2
+
+
+def test_status_keeps_passed_stages():
+    text = core.render_status("Go", "download", 1 * core.MB, 2 * core.MB, passed=("queue", "probe"))
+    lines = text.split("\n")
+    assert lines[1:3] == [core.t("dl_stage_queue"), core.t("dl_stage_probe")]
+    assert lines[3] == core.t("dl_stage_download") and "50%" in lines[4]
+
+
+def test_upload_line_appended_after_stages(env, monkeypatch):
+    _store, bot = env
+    monkeypatch.setattr(downloader, "download", fake_download())
+    asyncio.run(core.deliver_video(bot, GROUP, "https://youtu.be/x", reply_to=7))
+    final = bot.edits[-1][2]
+    for stage in ("queue", "probe", "download", "upload"):
+        assert core.t(f"dl_stage_{stage}") in final
+    assert final.index(core.t("dl_stage_probe")) < final.index(core.t("dl_stage_upload"))
+
+
+def test_drumroll_is_one_growing_message(env, monkeypatch):
+    store, bot = env
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr(core.asyncio, "sleep", lambda *_: real_sleep(0))
+    store.touch(GROUP, 1, "Ann")
+    winner, new = asyncio.run(core.roll_hero(bot, GROUP))
+    assert new and winner == 1
+    messages = [s for s in bot.sent if s[0] == "message"]
+    assert len(messages) == 2  # one drumroll message + the separate reveal that pings
+    drum_edits = [e for e in bot.edits if e[0] == GROUP]
+    assert len(drum_edits) == 2 and drum_edits[-1][2].startswith(messages[0][2])
+    assert drum_edits[-1][2].count("\n") == 2
