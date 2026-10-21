@@ -219,12 +219,14 @@ def who_answer(chat_id: int, question: str) -> str | None:
     return tt(chat_id, "who_answer", rng, question=question, mention=winner_mention(chat_id, picked))
 
 
-def duel_call_text(chat_id: int, challenger: int, target: int | None) -> str:
-    """First line of a duel message; later events are appended below it, never replace it."""
+def duel_call_text(chat_id: int, duel_id: int, challenger: int, target: int | None) -> str:
+    """First line of a duel message; later events are appended below it, never replace it.
+    The variant is seeded by the duel id, so rebuilding the line for every edit gives the same text."""
+    pick = random.Random(duel_id)
     me = winner_mention(chat_id, challenger)
     if target:
-        return tt(chat_id, "duel_call", a=me, b=winner_mention(chat_id, target))
-    return tt(chat_id, "duel_open", a=me)
+        return tt(chat_id, "duel_call", pick, a=me, b=winner_mention(chat_id, target))
+    return tt(chat_id, "duel_open", pick, a=me)
 
 
 def duel_outcome(challenger: int, opponent: int) -> tuple[int, int]:
@@ -424,7 +426,7 @@ async def sweeper(bot: Bot) -> None:
         for duel_id, chat_id, message_id in store.stale_duels(time.time() - DUEL_TTL):
             duel = store.duel(duel_id)
             if store.finish_duel(duel_id, "expired") and message_id:
-                text = duel_call_text(chat_id, duel["challenger"], duel["target"]) + "\n" + tt(chat_id, "duel_expired")
+                text = duel_call_text(chat_id, duel_id, duel["challenger"], duel["target"]) + "\n" + tt(chat_id, "duel_expired")
                 try:
                     await bot.edit_message_text(text, chat_id=chat_id, message_id=message_id)
                 except TelegramAPIError:

@@ -390,7 +390,7 @@ async def cmd_duel(message: Message, bot: Bot) -> None:
     if target_user:
         store.touch(chat_id, target, display_name(target_user), register=False, username=target_user.username)
     duel_id = store.create_duel(chat_id, challenger, target, time.time())
-    sent = await message.reply(duel_call_text(chat_id, challenger, target), reply_markup=duel_keyboard(duel_id))
+    sent = await message.reply(duel_call_text(chat_id, duel_id, challenger, target), reply_markup=duel_keyboard(duel_id))
     store.set_duel_message(duel_id, sent.message_id)
 
 
@@ -409,7 +409,7 @@ async def on_duel_button(callback: CallbackQuery, bot: Bot) -> None:
     store.touch(chat_id, presser, display_name(callback.from_user), register=False,
                 username=callback.from_user.username)
     # Every step is appended under the challenge as a new line: the whole story stays readable.
-    story = [duel_call_text(chat_id, challenger, target)]
+    story = [duel_call_text(chat_id, duel["id"], challenger, target)]
 
     if action == "decline":
         if presser == challenger:

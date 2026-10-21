@@ -145,3 +145,12 @@ def test_who_answer(env):
     text = core.who_answer(CHAT, "  кто проставляется? ")
     assert text.startswith("кто проставляется?") or "кто проставляется" in text
     assert core.who_answer(-1, "x") is None
+
+
+def test_duel_call_line_is_stable_per_duel(env):
+    _store, _ = env
+    core.set_tone(CHAT, 1)
+    first = {core.duel_call_text(CHAT, 7, 1, 2) for _ in range(5)}
+    assert len(first) == 1  # rebuilt for every edit, must not change
+    variants = {core.duel_call_text(CHAT, d, 1, None) for d in range(1, 60)}
+    assert len(variants) > 3  # different duels still get different openings
