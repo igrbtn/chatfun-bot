@@ -1,0 +1,5 @@
+aiogram==3.31.0
+yt-dlp==2026.8.19
+yt-dlp-ejs==0.8.0
+PyYAML==6.0.3
+tzdata==2026.5

@@ -1,0 +1,30 @@
+# Settings come from .env (copy .env.example). data/ keeps only chatfun.db: game, chat settings, counters.
+services:
+  bot:
+    build: .
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      WEB_PORT: "8095"
+      TMPDIR: /tmp
+    volumes:
+      - ./data:/data
+    # Videos are downloaded to RAM and deleted right after sending; nothing lands on disk.
+    tmpfs:
+      - /tmp:size=1g
+    # Mini App + API. Local only by default: publish it through your HTTPS reverse proxy / tunnel.
+    # Set HOST_BIND=0.0.0.0 in .env if the proxy runs on another host.
+    ports:
+      - "${HOST_BIND:-127.0.0.1}:${HOST_PORT:-8095}:8095"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "healthcheck.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ChatFun</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="preload" id="strings" href="/static/ru.json" as="fetch" crossorigin>
+</head>
+<body>
+<header id="chathead" hidden>
+  <div class="chatbar">
+    <div class="chatname"><small class="muted" id="chatrole"></small><b id="chattitle"></b></div>
+    <button id="switchchat" data-t="switch_chat"></button>
+  </div>
+  <nav id="tabs">
+    <button data-tab="hero" class="on" data-t="tab_games"></button>
+    <button data-tab="stats" data-t="tab_stats"></button>
+    <button data-tab="dl" data-t="tab_dl"></button>
+    <button data-tab="admin" data-t="tab_admin" hidden></button>
+  </nav>
+</header>
+<main>
+  <section id="picker" hidden>
+    <h2 id="pickertitle"></h2>
+    <input id="chatsearch" type="text" autocomplete="off" data-tp="search_chats" hidden>
+    <div id="chatlist" class="list"></div>
+    <div id="nochats" class="card muted" hidden data-t="no_chats"></div>
+  </section>
+
+  <section id="hero" hidden>
+    <div id="herobox">
+      <div class="card today">
+        <div class="label" id="todaylabel"></div>
+        <div id="winner" class="winner"></div>
+        <button id="roll" class="primary" data-t="roll"></button>
+        <div id="herooff" class="muted" hidden data-t="hero_off"></div>
+      </div>
+      <div class="card today" id="paircard">
+        <div class="label" id="pairlabel"></div>
+        <div id="pairnames" class="winner pair"></div>
+        <button id="pairroll" class="primary" data-t="pair_roll"></button>
+      </div>
+      <div class="card" id="whocard">
+        <div class="label" data-t="who_label"></div>
+        <div class="inline">
+          <input id="whoinput" type="text" maxlength="200" autocomplete="off" data-tp="who_placeholder">
+          <button id="whogo" class="primary" data-t="who_go"></button>
+        </div>
+        <p id="whoanswer" class="answer"></p>
+      </div>
+      <label class="card row">
+        <span><span data-t="me_play"></span><br><small class="muted" id="players"></small></span>
+        <input type="checkbox" id="meactive" class="switch">
+      </label>
+      <h3 id="toptitle"></h3>
+      <ol id="top" class="list"></ol>
+      <div id="pairsbox">
+        <h3 id="pairstitle"></h3>
+        <ol id="pairs" class="list"></ol>
+      </div>
+    </div>
+  </section>
+
+  <section id="stats" hidden>
+    <div class="segments" id="periods">
+      <button data-period="day" data-t="seg_day"></button>
+      <button data-period="week" class="on" data-t="seg_week"></button>
+      <button data-period="all" data-t="seg_all"></button>
+    </div>
+    <div id="statsbox">
+      <h3 id="statstitle"></h3>
+      <ol id="statsrows" class="list"></ol>
+    </div>
+    <div id="duelsbox">
+      <h3 data-t="duels_title"></h3>
+      <ol id="duelrows" class="list"></ol>
+      <p class="muted small" data-t="duel_hint"></p>
+    </div>
+  </section>
+
+  <section id="dl" hidden>
+    <div class="card">
+      <p class="muted" data-t="dl_hint"></p>
+      <input id="url" type="url" inputmode="url" autocomplete="off" data-tp="dl_placeholder">
+      <button id="dlgo" class="primary" data-t="dl_go"></button>
+      <p id="dlmsg" class="muted"></p>
+    </div>
+  </section>
+
+  <section id="admin" hidden>
+    <h3 data-t="game_name"></h3>
+    <div class="card">
+      <input id="titleinput" type="text" maxlength="40" autocomplete="off">
+      <div id="presets" class="chips"></div>
+      <button id="titlesave" class="primary" data-t="save"></button>
+    </div>
+    <h3 data-t="tone_title"></h3>
+    <div id="tones" class="list tones"></div>
+    <h3 data-t="pair_name"></h3>
+    <div class="card">
+      <input id="pairtitleinput" type="text" maxlength="40" autocomplete="off">
+      <div id="pairpresets" class="chips"></div>
+      <button id="pairtitlesave" class="primary" data-t="save"></button>
+    </div>
+    <h3 data-t="settings"></h3>
+    <div id="settings" class="list"></div>
+    <h3 data-t="game"></h3>
+    <div class="card buttons">
+      <button id="reroll" data-t="reroll"></button>
+      <button id="reset" class="danger" data-t="reset"></button>
+    </div>
+    <h3 data-t="members"></h3>
+    <div class="card">
+      <textarea id="playersinput" rows="3" autocomplete="off"></textarea>
+      <p class="muted small" data-t="add_hint"></p>
+      <button id="playersadd" class="primary" data-t="add_players"></button>
+    </div>
+    <div id="members" class="list"></div>
+  </section>
+</main>
+<div id="toast" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
