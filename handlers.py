@@ -20,6 +20,7 @@ import downloader
 import games
 from core import (
     TITLE_MAX,
+    PushError,
     cfg,
     chat_param,
     chat_tone,
@@ -31,6 +32,7 @@ from core import (
     normalize_title,
     pair_vars,
     parse_players,
+    push_title,
     quiet_name,
     rng,
     roll_hero,
@@ -198,6 +200,23 @@ async def cmd_hero(message: Message, bot: Bot) -> None:
     elif not is_new:
         mention = quiet_name(message.chat.id, winner_id)
         await service_reply(message, tt(message.chat.id, "hero_already", mention=mention, **title_vars(message.chat.id)))
+
+
+@router.message(Command("push"))
+async def cmd_push(message: Message, bot: Bot) -> None:
+    """Today's hero replies /push to someone: one shot per day to hand the title over, odds by activity."""
+    if not await feature_on(message, "push"):
+        return
+    chat_id = message.chat.id
+    target = message.reply_to_message.from_user if message.reply_to_message else None
+    if target is None or target.is_bot:
+        await service_reply(message, tt(chat_id, "push_no_reply"))
+        return
+    store.touch(chat_id, target.id, display_name(target), register=False, username=target.username)
+    try:
+        await push_title(bot, chat_id, message.from_user.id, target.id, reply_to=message.message_id)
+    except PushError as e:
+        await service_reply(message, tt(chat_id, f"push_{e.code}") if e.code != "off" else tt(chat_id, "feature_off"))
 
 
 @router.message(Command("title"), F.chat.type.in_(GROUPS))

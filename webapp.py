@@ -18,6 +18,7 @@ import downloader
 import games
 from core import (
     PAIR_TITLE_KEY,
+    PushError,
     cfg,
     chat_tone,
     deliver_video,
@@ -28,6 +29,7 @@ from core import (
     pair_title,
     parse_chat_param,
     parse_players,
+    push_title,
     roll_hero,
     roll_pair,
     set_tone,
@@ -146,6 +148,7 @@ async def chat_view(request: web.Request) -> web.Response:
         "me": {"active": bool(mine and mine.active)},
         "admin": await is_chat_admin(_bot(request), chat_id, user_id),
         "features": {k: settings[k] for k in ("hero", "pair", "stats", "random", "duels")},
+        "push": _push_info(chat_id, user_id, settings),
         "pair": {
             "title": pair_title(chat_id),
             "today": _pair(chat_id, store.pair_for(chat_id, today().isoformat())),
@@ -155,6 +158,29 @@ async def chat_view(request: web.Request) -> web.Response:
             ],
         },
     })
+
+
+def _push_info(chat_id: int, user_id: int, settings: dict) -> dict:
+    """Mini App can offer the push only to today's hero who has not tried yet."""
+    day = today().isoformat()
+    available = (
+        settings["push"] and settings["hero"]
+        and store.pick_for(chat_id, day) == user_id and store.push_for(chat_id, day) is None
+    )
+    targets = [{"id": m.user_id, "name": m.name} for m in store.all_members(chat_id) if m.user_id != user_id]
+    return {"available": available, "targets": targets if available else []}
+
+
+async def push(request: web.Request) -> web.Response:
+    chat_id = await _chat(request)
+    victim = (await _body(request)).get("victim")
+    if not isinstance(victim, int):
+        raise _json_error(400, "bad_user")
+    try:
+        success = await push_title(_bot(request), chat_id, _init(request).user.id, victim)
+    except PushError as e:
+        raise _json_error(409, f"push_{e.code}") from None
+    return web.json_response({"success": success})
 
 
 def _pair(chat_id: int, pair: tuple[int, int] | None) -> list[dict] | None:
@@ -368,6 +394,7 @@ def build_app(bot: Bot, index_html: str | None = None) -> web.Application:
         web.post("/api/chats/{chat_id}/roll", roll),
         web.post("/api/chats/{chat_id}/me", set_me),
         web.post("/api/chats/{chat_id}/pair/roll", pair_roll),
+        web.post("/api/chats/{chat_id}/push", push),
         web.get("/api/chats/{chat_id}/stats", stats_view),
         web.post("/api/chats/{chat_id}/who", who),
         web.post("/api/download", download),

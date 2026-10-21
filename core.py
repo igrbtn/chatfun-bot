@@ -157,9 +157,39 @@ def winner_mention(chat_id: int, user_id: int) -> str:
     return mention(user_id, name)
 
 
+MILESTONES = (5, 10, 25, 50, 100, 200, 365)
+COMEBACK_DAYS = 30
+
+
+def activity_weights(chat_id: int) -> dict[int, float]:
+    """Weights from yesterday's and today's message counts (players with no messages weigh 1)."""
+    since = (today() - timedelta(days=1)).isoformat()
+    return {uid: hero.activity_weight(n) for uid, n in store.messages_since(chat_id, since).items()}
+
+
+def milestone_line(chat_id: int, user_id: int) -> str | None:
+    """One extra line for a fresh hero, if there is something to celebrate (or mock)."""
+    day = today().isoformat()
+    who = quiet_name(chat_id, user_id)
+    wins = store.wins(chat_id, user_id)
+    if wins == 1:
+        return tt(chat_id, "hero_first", rng, mention=who)
+    if wins in MILESTONES:
+        return tt(chat_id, "hero_count", rng, mention=who, count=wins)
+    last = store.last_win_before(chat_id, user_id, day)
+    if last and (today() - date.fromisoformat(last)).days >= COMEBACK_DAYS:
+        return tt(chat_id, "hero_comeback", rng, mention=who, days=(today() - date.fromisoformat(last)).days)
+    best, tied = store.leaders(chat_id)
+    if user_id in tied and best > 1:
+        key = "hero_leader" if len(tied) == 1 else "hero_caught"
+        return tt(chat_id, key, rng, mention=who, count=best)
+    return None
+
+
 async def roll_hero(bot: Bot, chat_id: int) -> tuple[int | None, bool]:
     """Pick today's hero; a fresh pick is announced in the group."""
-    winner_id, is_new = hero.pick_today(store, chat_id, today(), rng)
+    weights = activity_weights(chat_id) if store.settings(chat_id)["weighted"] else None
+    winner_id, is_new, chance = hero.pick_today(store, chat_id, today(), rng, weights)
     if winner_id is not None and is_new:
         if store.settings(chat_id)["drumroll"]:
             # One message that grows line by line; the reveal stays separate so the winner gets pinged.
@@ -172,8 +202,13 @@ async def roll_hero(bot: Bot, chat_id: int) -> tuple[int | None, bool]:
                 except TelegramAPIError:
                     pass
             await asyncio.sleep(suspense())
-        reveal = tt(chat_id, "hero_reveal", rng, mention=winner_mention(chat_id, winner_id), **title_vars(chat_id))
-        await bot.send_message(chat_id, reveal)
+        lines = [tt(chat_id, "hero_reveal", rng, mention=winner_mention(chat_id, winner_id), **title_vars(chat_id))]
+        if weights is not None and chance is not None:
+            lines.append(tt(chat_id, "hero_chance", rng, pct=max(1, round(chance * 100))))
+        extra = milestone_line(chat_id, winner_id)
+        if extra:
+            lines.append(extra)
+        await bot.send_message(chat_id, "\n".join(lines))
         await maybe_tie_poll(bot, chat_id)
     return winner_id, is_new
 
@@ -234,6 +269,54 @@ def duel_call_text(chat_id: int, duel_id: int, challenger: int, target: int | No
     if target:
         return tt(chat_id, "duel_call", pick, a=me, b=winner_mention(chat_id, target))
     return tt(chat_id, "duel_open", pick, a=me)
+
+
+class PushError(Exception):
+    """Why /push cannot happen: not_hero, used, self, unknown, off."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+async def push_title(bot: Bot, chat_id: int, hero_id: int, victim_id: int, reply_to: int | None = None) -> bool:
+    """Today's hero tries once to push the title onto someone, with activity-based odds shown up front.
+    Success moves today's pick to the victim; failure gives the hero a double win. Returns success."""
+    settings = store.settings(chat_id)
+    if not (settings["push"] and settings["hero"]):
+        raise PushError("off")
+    day = today().isoformat()
+    if store.pick_for(chat_id, day) != hero_id:
+        raise PushError("not_hero")
+    if victim_id == hero_id:
+        raise PushError("self")
+    if store.member(chat_id, victim_id) is None:
+        raise PushError("unknown")
+    if store.push_for(chat_id, day) is not None:
+        raise PushError("used")
+    weights = activity_weights(chat_id)
+    chance = hero.push_success_chance(weights.get(hero_id, 1.0), weights.get(victim_id, 1.0))
+    success = rng.random() < chance
+    if not store.save_push(chat_id, day, hero_id, victim_id, victim_id if success else hero_id):
+        raise PushError("used")
+    if success:
+        store.transfer_pick(chat_id, day, victim_id)
+
+    pct = round(chance * 100)
+    story = [tt(chat_id, "push_call", rng, hero=winner_mention(chat_id, hero_id),
+                victim=winner_mention(chat_id, victim_id), pct=pct, pct_victim=100 - pct, **title_vars(chat_id))]
+    reply = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
+    msg = await bot.send_message(chat_id, story[0], reply_parameters=reply)
+    a, b = quiet_name(chat_id, hero_id), quiet_name(chat_id, victim_id)
+    for line in (tt(chat_id, "push_fight", rng, hero=a, victim=b),
+                 tt(chat_id, "push_ok" if success else "push_fail", rng, hero=a, victim=b, **title_vars(chat_id))):
+        await asyncio.sleep(suspense())
+        story.append(line)
+        try:
+            await bot.edit_message_text("\n".join(story), chat_id=chat_id, message_id=msg.message_id)
+        except TelegramAPIError:
+            pass
+    return success
 
 
 def duel_outcome(challenger: int, opponent: int) -> tuple[int, int]:

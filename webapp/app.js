@@ -110,6 +110,18 @@
     $("players").textContent = t("players", { n: c.players });
     ranking($("top"), c.top, function (r) { return r.name; }, function (r) { return String(r.count); }, isMe);
 
+    var push = c.push;
+    $("pushbox").hidden = !push.available;
+    if (push.available) {
+      var sel = $("pushtarget");
+      sel.textContent = "";
+      push.targets.forEach(function (m) {
+        var o = el("option", "", m.name);
+        o.value = String(m.id);
+        sel.appendChild(o);
+      });
+    }
+
     var p = c.pair;
     $("paircard").hidden = !f.pair;
     $("pairsbox").hidden = !f.pair;
@@ -144,6 +156,20 @@
     }).catch(showError).then(function () {
       btn.disabled = false;
       btn.textContent = t("roll");
+    });
+  });
+
+  $("pushgo").addEventListener("click", function () {
+    var btn = $("pushgo");
+    btn.disabled = true;
+    btn.textContent = t("rolling");
+    api("POST", "/chats/" + state.chatId + "/push", { victim: Number($("pushtarget").value) }).then(function (r) {
+      haptic(r.success ? "success" : "error");
+      toast(t(r.success ? "push_done" : "push_failed"));
+      return loadChat();
+    }).catch(showError).then(function () {
+      btn.disabled = false;
+      btn.textContent = t("push_go");
     });
   });
 
@@ -223,7 +249,7 @@
   // --- admin --------------------------------------------------------
 
   var SETTING_KEYS = ["downloads", "hero", "auto_register", "drumroll", "tie_poll", "pair", "stats", "random",
-    "duels", "chatter"];
+    "duels", "chatter", "weighted", "push"];
 
   function switchRow(label, checked, onChange) {
     var row = el("label", "row");

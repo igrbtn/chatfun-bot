@@ -192,3 +192,15 @@ def test_admin_tone(env):
     admin = call(bot, ADMIN, "GET", f"/api/chats/{CHAT}/admin")[1]
     assert admin["tone"] == 5 and [x["id"] for x in admin["tones"]] == [1, 2, 3, 4, 5]
     assert all(x["sample"] and "<" not in x["sample"] for x in admin["tones"])
+
+
+def test_push_endpoint(env):
+    store, bot = env
+    store.save_pick(CHAT, core.today().isoformat(), USER)
+    view = call(bot, USER, "GET", f"/api/chats/{CHAT}")[1]
+    assert view["push"]["available"] and {t["id"] for t in view["push"]["targets"]} == {ADMIN}
+    assert call(bot, ADMIN, "GET", f"/api/chats/{CHAT}")[1]["push"]["available"] is False
+    assert call(bot, ADMIN, "POST", f"/api/chats/{CHAT}/push", {"victim": USER})[1] == {"error": "push_not_hero"}
+    status, data = call(bot, USER, "POST", f"/api/chats/{CHAT}/push", {"victim": ADMIN})
+    assert status == 200 and isinstance(data["success"], bool)
+    assert call(bot, USER, "POST", f"/api/chats/{CHAT}/push", {"victim": ADMIN})[0] == 409

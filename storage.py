@@ -55,6 +55,14 @@ CREATE TABLE IF NOT EXISTS pair_picks (
     user_b INTEGER NOT NULL,
     PRIMARY KEY (chat_id, day)
 );
+CREATE TABLE IF NOT EXISTS hero_pushes (
+    chat_id INTEGER NOT NULL,
+    day TEXT NOT NULL,
+    hero INTEGER NOT NULL,
+    victim INTEGER NOT NULL,
+    winner INTEGER NOT NULL,
+    PRIMARY KEY (chat_id, day)
+);
 CREATE TABLE IF NOT EXISTS duels (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id INTEGER NOT NULL,
@@ -84,6 +92,8 @@ DEFAULT_SETTINGS = {
     "random": True,         # /who /ball /coin /roll
     "duels": True,          # /duel challenges
     "chatter": True,        # answer when someone replies to or mentions the bot
+    "weighted": True,       # daily pick odds grow with recent activity
+    "push": True,           # today's hero may try once to push the title onto someone (/push)
 }
 
 
@@ -297,20 +307,62 @@ class Store:
         return cur.rowcount == 1
 
     def clear_pick(self, chat_id: int, day: str) -> bool:
+        self.db.execute("DELETE FROM hero_pushes WHERE chat_id = ? AND day = ?", (chat_id, day))
         cur = self.db.execute("DELETE FROM picks WHERE chat_id = ? AND day = ?", (chat_id, day))
         return cur.rowcount == 1
 
     def reset_scores(self, chat_id: int) -> int:
+        self.db.execute("DELETE FROM hero_pushes WHERE chat_id = ?", (chat_id,))
         return self.db.execute("DELETE FROM picks WHERE chat_id = ?", (chat_id,)).rowcount
+
+    # Every win as (user_id, day): daily picks plus the "double" a hero earns by failing to push the title away.
+    SCORES = (
+        "SELECT user_id, day FROM picks WHERE chat_id = :chat "
+        "UNION ALL SELECT hero AS user_id, day FROM hero_pushes WHERE chat_id = :chat AND winner = hero"
+    )
 
     def top(self, chat_id: int, limit: int = 10) -> list[tuple[int, str, int]]:
         rows = self.db.execute(
-            "SELECT p.user_id, COALESCE(m.name, CAST(p.user_id AS TEXT)), COUNT(*) AS n FROM picks p "
-            "LEFT JOIN members m ON m.chat_id = p.chat_id AND m.user_id = p.user_id "
-            "WHERE p.chat_id = ? GROUP BY p.user_id ORDER BY n DESC, MAX(p.day) DESC LIMIT ?",
-            (chat_id, limit),
+            f"SELECT s.user_id, COALESCE(m.name, CAST(s.user_id AS TEXT)), COUNT(*) AS n FROM ({self.SCORES}) s "
+            "LEFT JOIN members m ON m.chat_id = :chat AND m.user_id = s.user_id "
+            "GROUP BY s.user_id ORDER BY n DESC, MAX(s.day) DESC LIMIT :limit",
+            {"chat": chat_id, "limit": limit},
         )
         return [(uid, name, n) for uid, name, n in rows]
+
+    def wins(self, chat_id: int, user_id: int) -> int:
+        return self.db.execute(
+            f"SELECT COUNT(*) FROM ({self.SCORES}) s WHERE s.user_id = :user", {"chat": chat_id, "user": user_id}
+        ).fetchone()[0]
+
+    def last_win_before(self, chat_id: int, user_id: int, day: str) -> str | None:
+        return self.db.execute(
+            "SELECT MAX(day) FROM picks WHERE chat_id = ? AND user_id = ? AND day < ?", (chat_id, user_id, day)
+        ).fetchone()[0]
+
+    def transfer_pick(self, chat_id: int, day: str, user_id: int) -> None:
+        self.db.execute("UPDATE picks SET user_id = ? WHERE chat_id = ? AND day = ?", (user_id, chat_id, day))
+
+    def push_for(self, chat_id: int, day: str) -> dict | None:
+        row = self.db.execute(
+            "SELECT hero, victim, winner FROM hero_pushes WHERE chat_id = ? AND day = ?", (chat_id, day)
+        ).fetchone()
+        return {"hero": row[0], "victim": row[1], "winner": row[2]} if row else None
+
+    def save_push(self, chat_id: int, day: str, hero: int, victim: int, winner: int) -> bool:
+        """One push attempt per chat per day; False if it was already used."""
+        return self.db.execute(
+            "INSERT OR IGNORE INTO hero_pushes (chat_id, day, hero, victim, winner) VALUES (?, ?, ?, ?, ?)",
+            (chat_id, day, hero, victim, winner),
+        ).rowcount == 1
+
+    def messages_since(self, chat_id: int, since: str) -> dict[int, int]:
+        """user_id -> messages counted from `since` (ISO day, inclusive)."""
+        rows = self.db.execute(
+            "SELECT user_id, SUM(messages) FROM activity WHERE chat_id = ? AND day >= ? GROUP BY user_id",
+            (chat_id, since),
+        )
+        return {uid: n for uid, n in rows}
 
     # --- bot messages ----------------------------------------------------
 
@@ -365,9 +417,7 @@ class Store:
         """(top score, user ids sharing it), ordered by who reached that score first
         (that one is the "previous leader" and wins a drawn vote)."""
         reached: dict[int, tuple[int, str]] = {}  # user -> (wins so far, day of the latest win)
-        for user_id, day in self.db.execute(
-            "SELECT user_id, day FROM picks WHERE chat_id = ? ORDER BY day", (chat_id,)
-        ):
+        for user_id, day in self.db.execute(f"SELECT user_id, day FROM ({self.SCORES}) ORDER BY day", {"chat": chat_id}):
             wins = reached.get(user_id, (0, ""))[0] + 1
             reached[user_id] = (wins, day)
         if not reached:

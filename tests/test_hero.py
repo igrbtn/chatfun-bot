@@ -16,21 +16,21 @@ def make_store(*names):
 def test_pick_is_stable_within_a_day():
     s = make_store("Ann", "Bob", "Cid")
     d = date(2026, 10, 16)
-    first, new = hero.pick_today(s, -100, d, random.Random(1))
+    first, new, _ = hero.pick_today(s, -100, d, random.Random(1))
     assert new
-    again, new2 = hero.pick_today(s, -100, d, random.Random(2))
+    again, new2, _ = hero.pick_today(s, -100, d, random.Random(2))
     assert (again, new2) == (first, False)
 
 
 def test_yesterday_winner_sits_out():
     members = [Member(1, "A"), Member(2, "B")]
     for seed in range(20):
-        assert hero.choose(members, 1, random.Random(seed)).user_id == 2
-    assert hero.choose([Member(1, "A")], 1, random.Random(0)).user_id == 1
+        assert hero.choose(members, 1, random.Random(seed))[0].user_id == 2
+    assert hero.choose([Member(1, "A")], 1, random.Random(0))[0].user_id == 1
 
 
 def test_empty_chat():
-    assert hero.pick_today(Store(":memory:"), -100, date(2026, 1, 1), random.Random()) == (None, False)
+    assert hero.pick_today(Store(":memory:"), -100, date(2026, 1, 1), random.Random()) == (None, False, None)
 
 
 def test_opt_out_survives_touch():
