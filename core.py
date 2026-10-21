@@ -166,12 +166,12 @@ async def roll_hero(bot: Bot, chat_id: int) -> tuple[int | None, bool]:
             lines = rng.choice(raw("hero_drumroll", chat_tone(chat_id)))
             drum = await bot.send_message(chat_id, lines[0])
             for i in range(1, len(lines)):
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(suspense())
                 try:
                     await bot.edit_message_text("\n".join(lines[: i + 1]), chat_id=chat_id, message_id=drum.message_id)
                 except TelegramAPIError:
                     pass
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(suspense())
         reveal = tt(chat_id, "hero_reveal", rng, mention=winner_mention(chat_id, winner_id), **title_vars(chat_id))
         await bot.send_message(chat_id, reveal)
         await maybe_tie_poll(bot, chat_id)
@@ -217,6 +217,13 @@ def who_answer(chat_id: int, question: str) -> str | None:
     picked = rng.choice(members).user_id
     question = html.escape(question.strip().rstrip("?").strip()) or t("who_default")
     return tt(chat_id, "who_answer", rng, question=question, mention=winner_mention(chat_id, picked))
+
+
+SUSPENSE = (2.5, 4.0)  # seconds between suspense lines; jittered so it does not feel mechanical
+
+
+def suspense() -> float:
+    return rng.uniform(*SUSPENSE)
 
 
 def duel_call_text(chat_id: int, duel_id: int, challenger: int, target: int | None) -> str:

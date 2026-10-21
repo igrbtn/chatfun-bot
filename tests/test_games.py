@@ -154,3 +154,9 @@ def test_duel_call_line_is_stable_per_duel(env):
     assert len(first) == 1  # rebuilt for every edit, must not change
     variants = {core.duel_call_text(CHAT, d, 1, None) for d in range(1, 60)}
     assert len(variants) > 3  # different duels still get different openings
+
+
+def test_suspense_pause_range():
+    pauses = [core.suspense() for _ in range(200)]
+    assert min(pauses) >= core.SUSPENSE[0] and max(pauses) <= core.SUSPENSE[1]
+    assert max(pauses) - min(pauses) > 0.5  # jittered, not a fixed beat

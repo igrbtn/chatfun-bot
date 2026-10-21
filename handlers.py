@@ -37,6 +37,7 @@ from core import (
     roll_pair,
     set_tone,
     store,
+    suspense,
     title_vars,
     today,
     tt,
@@ -441,7 +442,7 @@ async def on_duel_button(callback: CallbackQuery, bot: Bot) -> None:
     try:
         story.append(tt(chat_id, "duel_fight", rng, a=a, b=b))
         await callback.message.edit_text("\n".join(story))
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(suspense())
         story.append(tt(chat_id, "duel_result", rng, winner=quiet_name(chat_id, winner),
                         loser=quiet_name(chat_id, loser)))
         await callback.message.edit_text("\n".join(story))
