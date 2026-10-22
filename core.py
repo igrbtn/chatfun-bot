@@ -209,7 +209,7 @@ async def roll_hero(bot: Bot, chat_id: int) -> tuple[int | None, bool]:
         if extra:
             lines.append(extra)
         await bot.send_message(chat_id, "\n".join(lines))
-        await maybe_tie_poll(bot, chat_id)
+        await settle_tie(bot, chat_id)
     return winner_id, is_new
 
 
@@ -328,29 +328,49 @@ TIE_POLL_SECONDS = 15 * 60
 POLL_MAX_OPTIONS = 10
 
 
-async def maybe_tie_poll(bot: Bot, chat_id: int) -> bool:
-    """Shared first place -> one 15-minute poll per distinct tie. Closed and announced by sweeper()."""
+async def settle_tie(bot: Bot, chat_id: int) -> bool:
+    """Shared first place -> coin flips settle it once per distinct tie (knockout for 3+).
+    Heads/tails give the champion +1; a coin on its edge gives everyone tied +1 and stops."""
     if not store.settings(chat_id)["tie_poll"]:
         return False
     best, tied = store.leaders(chat_id)
-    tied = tied[:POLL_MAX_OPTIONS]
     if len(tied) < 2:
         return False
     key = f"{best}:" + ",".join(str(u) for u in sorted(tied))
     if store.tie_polled(chat_id, key):
         return False
-    labels = []
-    for uid in tied:
-        member = store.member(chat_id, uid)
-        label = (f"@{member.username}" if member and member.username else (member.name if member else str(uid)))[:100]
-        labels.append(label if label not in labels else f"{label} ({len(labels) + 1})")
-    msg = await bot.send_poll(
-        chat_id,
-        question=tt(chat_id, "tie_poll_question", title=game_title(chat_id), score=best)[:300],
-        options=labels,
-        is_anonymous=False,
-    )
-    store.save_tie_poll(chat_id, key, msg.message_id, tied, time.time() + TIE_POLL_SECONDS)
+    order = tied[:]
+    rng.shuffle(order)
+    rounds, champion = games.coin_tournament(order, rng)
+    day = today().isoformat()
+    reason = "tie:" + key[:60]
+    names = ", ".join(quiet_name(chat_id, u) for u in order)
+    story = [tt(chat_id, "coin_tie_start", rng, names=names, score=best, **title_vars(chat_id))]
+    msg = await bot.send_message(chat_id, story[0])
+    store.save_tie_poll(chat_id, key, msg.message_id, order, time.time())
+    store.close_tie_poll(chat_id, key)
+    side_names = {"heads": t("coin_heads"), "tails": t("coin_tails"), "edge": t("coin_edge")}
+    for a, b, side, winner in rounds:
+        await asyncio.sleep(suspense())
+        if side == "edge":
+            line = tt(chat_id, "coin_tie_edge", rng, a=quiet_name(chat_id, a), b=quiet_name(chat_id, b))
+        else:
+            line = tt(chat_id, "coin_tie_round", rng, a=quiet_name(chat_id, a), b=quiet_name(chat_id, b),
+                      side=side_names[side], winner=quiet_name(chat_id, winner))
+        story.append(line)
+        try:
+            await bot.edit_message_text("\n".join(story), chat_id=chat_id, message_id=msg.message_id)
+        except TelegramAPIError:
+            pass
+    if champion is None:
+        for uid in tied:
+            store.add_bonus(chat_id, day, uid, reason)
+        await bot.send_message(chat_id, tt(chat_id, "coin_tie_all", rng, names=names))
+    else:
+        store.add_bonus(chat_id, day, champion, reason)
+        await asyncio.sleep(suspense())
+        await bot.send_message(chat_id, tt(chat_id, "coin_tie_winner", rng, mention=winner_mention(chat_id, champion),
+                                           **title_vars(chat_id)))
     return True
 
 

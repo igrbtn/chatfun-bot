@@ -35,46 +35,61 @@ def test_poll_winner_rules():
     assert core.poll_winner([1, 2], []) == (1, False)
 
 
-def test_tie_poll_once_per_tie_then_closed(env, monkeypatch):
-    store, bot = env
+class FixedRng:
+    """Feeds coin_tournament fixed rolls: < 0.04 edge, < 0.52 heads, else tails."""
+
+    def __init__(self, rolls):
+        self.rolls = list(rolls)
+
+    def random(self):
+        return self.rolls.pop(0)
+
+
+def test_coin_tournament_rules():
+    import games
+
+    rounds, champ = games.coin_tournament([1, 2, 3], FixedRng([0.3, 0.9]))
+    assert rounds == [(1, 2, "heads", 1), (1, 3, "tails", 3)] and champ == 3
+    rounds, champ = games.coin_tournament([1, 2, 3], FixedRng([0.3, 0.01]))
+    assert rounds[-1][2] == "edge" and champ is None and len(rounds) == 2
+
+
+@pytest.fixture
+def coin_env(env, monkeypatch):
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr(core.asyncio, "sleep", lambda *_: real_sleep(0))
+    monkeypatch.setattr(core.rng, "shuffle", lambda seq: None)  # keep leader order for predictable rounds
+    return env
+
+
+def test_tie_settled_by_coin_once(coin_env, monkeypatch):
+    store, bot = coin_env
     store.save_pick(CHAT, "2026-10-01", 1)
     store.save_pick(CHAT, "2026-10-02", 2)
-    assert asyncio.run(core.maybe_tie_poll(bot, CHAT))
-    assert not asyncio.run(core.maybe_tie_poll(bot, CHAT))
-    poll = [s for s in bot.sent if s[0] == "poll"]
-    assert len(poll) == 1 and poll[0][3] == ["@ann_xx", "@bob_xx"]
-
-    bot.poll_votes = [1, 3]
-    monkeypatch.setattr(core.time, "time", lambda: 10**12)
-    (chat, key, mid, options), = store.due_tie_polls(10**12)
-    asyncio.run(core.close_tie_poll(bot, chat, key, mid, options))
-    assert "@bob_xx" in bot.sent[-1][2]
-    assert store.due_tie_polls(10**12) == []
+    monkeypatch.setattr(core.rng, "random", lambda: 0.9)  # tails: second player wins
+    assert asyncio.run(core.settle_tie(bot, CHAT))
+    assert store.leaders(CHAT) == (2, [2])
+    messages = [s for s in bot.sent if s[0] == "message"]
+    assert len(messages) == 2  # growing toss message + separate winner announcement that pings
+    assert "@bob_xx" in messages[-1][2]
+    assert bot.edits and bot.edits[-1][2].count("\n") == 1  # start line + one round
+    assert not asyncio.run(core.settle_tie(bot, CHAT))  # nobody shares first place any more
+    assert not [s for s in bot.sent if s[0] == "poll"]
 
 
-def test_draw_goes_to_previous_leader_and_setting_off(env):
-    store, bot = env
-    store.save_pick(CHAT, "2026-10-01", 3)
-    store.save_pick(CHAT, "2026-10-02", 1)
+def test_edge_gives_everyone_a_point_and_stops(coin_env, monkeypatch):
+    store, bot = coin_env
+    for day, uid in (("2026-10-01", 1), ("2026-10-02", 2), ("2026-10-03", 3)):
+        store.save_pick(CHAT, day, uid)
+    monkeypatch.setattr(core.rng, "random", lambda: 0.01)  # first flip lands on its edge
+    assert asyncio.run(core.settle_tie(bot, CHAT))
+    assert store.leaders(CHAT) == (2, [1, 2, 3])
+    assert bot.edits[-1][2].count("\n") == 1  # stopped after the first flip
+
+
+def test_tie_coin_switched_off(coin_env):
+    store, bot = coin_env
+    store.save_pick(CHAT, "2026-10-01", 1)
+    store.save_pick(CHAT, "2026-10-02", 2)
     store.update_settings(CHAT, {"tie_poll": False})
-    assert not asyncio.run(core.maybe_tie_poll(bot, CHAT))
-    store.update_settings(CHAT, {"tie_poll": True})
-    assert asyncio.run(core.maybe_tie_poll(bot, CHAT))
-    bot.poll_votes = [2, 2]
-    (chat, key, mid, options), = store.due_tie_polls(10**12)
-    asyncio.run(core.close_tie_poll(bot, chat, key, mid, options))
-    assert "<b>Cid</b>" in bot.sent[-1][2] or "tg://user?id=3" in bot.sent[-1][2]
-
-
-def test_closed_poll_is_deleted_and_winner_gets_a_point(env):
-    store, bot = env
-    store.save_pick(CHAT, "2026-10-01", 1)
-    store.save_pick(CHAT, "2026-10-02", 2)
-    asyncio.run(core.maybe_tie_poll(bot, CHAT))
-    bot.poll_votes = [0, 2]
-    (chat, key, mid, options), = store.due_tie_polls(10**12)
-    asyncio.run(core.close_tie_poll(bot, chat, key, mid, options))
-    assert (CHAT, mid) in bot.deleted
-    assert store.leaders(CHAT) == (2, [2])  # tie broken by the +1
-    assert {uid: n for uid, _, n in store.top(CHAT)} == {1: 1, 2: 2}
-    assert not asyncio.run(core.maybe_tie_poll(bot, CHAT))  # no new poll: nobody shares first place
+    assert not asyncio.run(core.settle_tie(bot, CHAT))

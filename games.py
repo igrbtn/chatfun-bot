@@ -59,3 +59,24 @@ def classify_chatter(text: str, keywords: dict[str, list[str]]) -> str:
         if any(word in low for word in keywords.get(kind, [])):
             return kind
     return "question" if "?" in text else "generic"
+
+
+EDGE_CHANCE = 0.04  # a coin landing on its edge: rare, but it has to be able to happen
+
+
+def coin_tournament(players: list[int], rng: random.Random, edge: float = EDGE_CHANCE) -> tuple[list[tuple], int | None]:
+    """Knockout of coin flips: the winner of each flip meets the next player. Returns
+    ([(a, b, side, winner)], champion); side is "heads" (a wins), "tails" (b wins) or "edge".
+    An edge stops everything: champion is None and every tied player gets a point."""
+    rounds = []
+    holder = players[0]
+    for challenger in players[1:]:
+        roll = rng.random()
+        if roll < edge:
+            rounds.append((holder, challenger, "edge", None))
+            return rounds, None
+        side = "heads" if roll < edge + (1 - edge) / 2 else "tails"
+        winner = holder if side == "heads" else challenger
+        rounds.append((holder, challenger, side, winner))
+        holder = winner
+    return rounds, holder
