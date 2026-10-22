@@ -149,3 +149,19 @@ def test_old_push_table_is_migrated(tmp_path):
     s = Store(path)
     assert s.push_for(-1, "2026-10-22", 1) == {"hero": 1, "victim": 2, "winner": 1}
     assert s.save_push(-1, "2026-10-22", 2, 1, 2)  # another person may push the same day now
+
+
+def test_reply_to_push_announcement_throws_it_back(env, monkeypatch):
+    from types import SimpleNamespace
+
+    store, bot = env
+    day = core.today().isoformat()
+    store.save_pick(CHAT, day, 1)
+    monkeypatch.setattr(core.rng, "random", lambda: 0.0)
+    asyncio.run(core.push_title(bot, CHAT, 1, 2))
+    announcement = next(mid for mid, kind in store.messages(CHAT) if kind == "push:1")
+    reply = SimpleNamespace(message_id=announcement, from_user=SimpleNamespace(id=999, is_bot=True))
+    msg = SimpleNamespace(reply_to_message=reply, entities=None, text="/push")
+    assert handlers.push_target(msg, CHAT) == 1
+    other = SimpleNamespace(message_id=12345, from_user=SimpleNamespace(id=999, is_bot=True))
+    assert handlers.push_target(SimpleNamespace(reply_to_message=other, entities=None, text="/push"), CHAT) is None

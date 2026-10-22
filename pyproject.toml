@@ -1,6 +1,6 @@
 [project]
 name = "chatfun-bot"
-version = "1.4.0"
+version = "1.4.1"
 requires-python = ">=3.12"
 
 [tool.ruff]

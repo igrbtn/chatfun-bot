@@ -475,6 +475,12 @@ class Store:
             (now, chat_id, older_than),
         ).rowcount
 
+    def kind_of(self, chat_id: int, message_id: int) -> str | None:
+        row = self.db.execute(
+            "SELECT kind FROM bot_messages WHERE chat_id = ? AND message_id = ?", (chat_id, message_id)
+        ).fetchone()
+        return row[0] if row else None
+
     def forget(self, chat_id: int, message_id: int) -> None:
         self.db.execute("DELETE FROM bot_messages WHERE chat_id = ? AND message_id = ?", (chat_id, message_id))
 

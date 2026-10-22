@@ -210,7 +210,9 @@ def push_target(message: Message, chat_id: int) -> int | None:
     if message.reply_to_message and message.reply_to_message.from_user:
         target = message.reply_to_message.from_user
         if target.is_bot:
-            return None
+            # A reply to the bot's own "X pushes it onto Y" message means: throw it back to X.
+            kind = store.kind_of(chat_id, message.reply_to_message.message_id) or ""
+            return int(kind.split(":", 1)[1]) if kind.startswith("push:") else None
         store.touch(chat_id, target.id, display_name(target), register=False, username=target.username)
         return target.id
     for e in message.entities or []:

@@ -312,6 +312,8 @@ async def push_title(bot: Bot, chat_id: int, hero_id: int, victim_id: int, reply
                 victim=winner_mention(chat_id, victim_id), pct=pct, pct_victim=100 - pct, **title_vars(chat_id))]
     reply = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True) if reply_to else None
     msg = await bot.send_message(chat_id, story[0], reply_parameters=reply)
+    # Lets the victim answer this very message with /push to throw it back (hot potato).
+    store.remember(chat_id, msg.message_id, f"push:{hero_id}", time.time())
     a, b = quiet_name(chat_id, hero_id), quiet_name(chat_id, victim_id)
     for line in (tt(chat_id, "push_fight", rng, hero=a, victim=b),
                  tt(chat_id, "push_ok" if success else "push_fail", rng, hero=a, victim=b, **title_vars(chat_id))):
