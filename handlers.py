@@ -25,6 +25,7 @@ from core import (
     cfg,
     chat_param,
     chat_tone,
+    day_champion,
     deliver_video,
     display_name,
     duel_call_text,
@@ -201,7 +202,7 @@ async def cmd_hero(message: Message, bot: Bot) -> None:
     if winner_id is None:
         await service_reply(message, tt(message.chat.id, "hero_empty"))
     elif not is_new:
-        mention = quiet_name(message.chat.id, winner_id)
+        mention = quiet_name(message.chat.id, day_champion(message.chat.id) or winner_id)
         await service_reply(message, tt(message.chat.id, "hero_already", mention=mention, **title_vars(message.chat.id)))
 
 

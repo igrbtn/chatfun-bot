@@ -168,6 +168,12 @@ def activity_weights(chat_id: int) -> dict[int, float]:
     return {uid: hero.activity_weight(n) for uid, n in store.messages_since(chat_id, since).items()}
 
 
+def day_champion(chat_id: int) -> int | None:
+    """Who holds "X of the day" after today's whole fuss (pick, coin bonuses, pushes, doubles)."""
+    rows = store.day_points(chat_id, today().isoformat())
+    return rows[0][0] if rows else None
+
+
 def milestone_line(chat_id: int, user_id: int) -> str | None:
     """One extra line for a fresh hero, if there is something to celebrate (or mock)."""
     day = today().isoformat()

@@ -395,6 +395,18 @@ class Store:
         )
         return [(uid, name, n) for uid, name, n in rows]
 
+    def day_points(self, chat_id: int, day: str) -> list[tuple[int, str, int]]:
+        """Points gained on `day` (pick, tie bonus, pushes and doubles), most first; ties go to the
+        daily pick holder. The first row is the day's current champion."""
+        rows = self.db.execute(
+            f"SELECT s.user_id, COALESCE(m.name, CAST(s.user_id AS TEXT)), COUNT(*) AS n FROM ({self.SCORES}) s "
+            "LEFT JOIN members m ON m.chat_id = :chat AND m.user_id = s.user_id WHERE s.day = :day "
+            "GROUP BY s.user_id ORDER BY n DESC, "
+            "(s.user_id = (SELECT user_id FROM picks WHERE chat_id = :chat AND day = :day)) DESC, s.user_id",
+            {"chat": chat_id, "day": day},
+        )
+        return [(uid, name, n) for uid, name, n in rows]
+
     def wins(self, chat_id: int, user_id: int) -> int:
         return self.db.execute(
             f"SELECT COUNT(*) FROM ({self.SCORES}) s WHERE s.user_id = :user", {"chat": chat_id, "user": user_id}

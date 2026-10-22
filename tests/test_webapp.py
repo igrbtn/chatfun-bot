@@ -214,3 +214,14 @@ def test_admin_cleanup_settings(env):
     assert call(bot, USER, "POST", f"/api/chats/{CHAT}/admin/cleanup", {"hours": 1})[0] == 403
     assert call(bot, ADMIN, "POST", f"/api/chats/{CHAT}/admin/cleanup", {"hours": 168})[0] == 400
     assert call(bot, ADMIN, "POST", f"/api/chats/{CHAT}/admin/cleanup", {"hours": 24})[1] == {"cleanup_hours": 24}
+
+
+def test_today_shows_the_champion_not_the_pick(env):
+    store, bot = env
+    day = core.today().isoformat()
+    store.save_pick(CHAT, day, USER)
+    store.add_bonus(CHAT, day, ADMIN, "tie")
+    store.save_push(CHAT, day, ADMIN, USER, ADMIN)  # failed push: ADMIN has 2 today
+    view = call(bot, USER, "GET", f"/api/chats/{CHAT}")[1]
+    assert view["today"]["id"] == ADMIN and view["rolled"] is True
+    assert [p["count"] for p in view["today_points"]] == [2, 1]

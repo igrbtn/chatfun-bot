@@ -117,5 +117,6 @@
   "cleanup_off": "Выкл",
   "hours_n": "{n} ч",
   "set_cleanup_commands": "Удалять команды боту через 30 секунд",
-  "err_bad_hours": "Недопустимый срок"
+  "err_bad_hours": "Недопустимый срок",
+  "day_points": "Очки за сегодня: {list}"
 }

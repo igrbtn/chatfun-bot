@@ -24,6 +24,7 @@ from core import (
     cfg,
     chat_tone,
     cleanup_hours,
+    day_champion,
     deliver_video,
     game_title,
     is_chat_admin,
@@ -146,7 +147,11 @@ async def chat_view(request: web.Request) -> web.Response:
         "title": store.chat_title(chat_id) or str(chat_id),
         "hero_enabled": settings["hero"],
         "game_title": game_title(chat_id),
-        "today": _person(chat_id, store.pick_for(chat_id, today().isoformat())),
+        "today": _person(chat_id, day_champion(chat_id)),
+        "rolled": store.pick_for(chat_id, today().isoformat()) is not None,
+        "today_points": [
+            {"id": uid, "name": name, "count": n} for uid, name, n in store.day_points(chat_id, today().isoformat())
+        ],
         "top": [{"id": uid, "name": name, "count": n} for uid, name, n in store.top(chat_id, 20)],
         "players": len(store.active_members(chat_id)),
         "me": {"active": bool(mine and mine.active)},

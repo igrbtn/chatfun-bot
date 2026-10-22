@@ -104,7 +104,12 @@
     $("toptitle").textContent = c.game_title + ": " + t("top_title").toLowerCase();
     $("todaylabel").textContent = t("today_of", { title: c.game_title });
     $("winner").textContent = c.today ? c.today.name : t("nobody_yet");
-    $("roll").hidden = !c.hero_enabled || !!c.today;
+    $("roll").hidden = !c.hero_enabled || c.rolled;
+    var pts = c.today_points || [];
+    $("daypoints").hidden = pts.length < 2 && !(pts[0] && pts[0].count > 1);
+    $("daypoints").textContent = t("day_points", {
+      list: pts.map(function (p) { return p.name + " " + p.count; }).join(", ")
+    });
     $("herooff").hidden = c.hero_enabled;
     $("meactive").checked = c.me.active;
     $("players").textContent = t("players", { n: c.players });

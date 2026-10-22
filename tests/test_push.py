@@ -165,3 +165,18 @@ def test_reply_to_push_announcement_throws_it_back(env, monkeypatch):
     assert handlers.push_target(msg, CHAT) == 1
     other = SimpleNamespace(message_id=12345, from_user=SimpleNamespace(id=999, is_bot=True))
     assert handlers.push_target(SimpleNamespace(reply_to_message=other, entities=None, text="/push"), CHAT) is None
+
+
+def test_day_champion_follows_the_fuss(env, monkeypatch):
+    store, bot = env
+    day = core.today().isoformat()
+    store.save_pick(CHAT, day, 1)
+    assert core.day_champion(CHAT) == 1
+    store.add_bonus(CHAT, day, 2, "tie")
+    assert core.day_champion(CHAT) == 1  # 1:1 tie goes to the pick holder
+    monkeypatch.setattr(core.rng, "random", lambda: 0.0)
+    asyncio.run(core.push_title(bot, CHAT, 2, 3))  # bonus moves 2 -> 3
+    monkeypatch.setattr(core.rng, "random", lambda: 0.999)
+    asyncio.run(core.push_title(bot, CHAT, 3, 2))  # 3 fails to throw it back: double
+    assert store.day_points(CHAT, day) == [(3, "Cid", 2), (1, "Ann", 1)]
+    assert core.day_champion(CHAT) == 3
