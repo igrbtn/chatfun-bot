@@ -14,7 +14,7 @@ from aiohttp import web
 
 import handlers
 import webapp
-from core import cfg, sweeper
+from core import RecordSent, cfg, sweeper
 from messages import raw, t
 
 log = logging.getLogger("chatfun")
@@ -29,6 +29,7 @@ async def main() -> None:
         shutil.rmtree(stale, ignore_errors=True)
 
     bot = Bot(cfg.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    bot.session.middleware(RecordSent())
     dp = Dispatcher()
     handlers.router.message.outer_middleware(handlers.ChatGate())
     handlers.router.message.outer_middleware(handlers.AntiFlood())

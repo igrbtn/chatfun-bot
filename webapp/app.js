@@ -249,7 +249,8 @@
   // --- admin --------------------------------------------------------
 
   var SETTING_KEYS = ["downloads", "hero", "auto_register", "drumroll", "tie_poll", "pair", "stats", "random",
-    "duels", "chatter", "weighted", "push"];
+    "duels", "chatter", "weighted", "push",
+    "cleanup_commands"];
 
   function switchRow(label, checked, onChange) {
     var row = el("label", "row");
@@ -295,7 +296,28 @@
     });
   }
 
+  function renderCleanup(a) {
+    $("cleanuprights").textContent = t(a.bot_can_delete ? "cleanup_rights_ok" : "cleanup_rights_no");
+    $("cleanuprights").className = "small " + (a.bot_can_delete ? "ok" : "warn");
+    var box = $("cleanuphours");
+    box.textContent = "";
+    a.cleanup_choices.forEach(function (h) {
+      var b = el("button", h === a.cleanup_hours ? "on" : "", h ? t("hours_n", { n: h }) : t("cleanup_off"));
+      b.type = "button";
+      b.addEventListener("click", function () {
+        api("POST", "/chats/" + state.chatId + "/admin/cleanup", { hours: h }).then(function (r) {
+          a.cleanup_hours = r.cleanup_hours;
+          haptic("success");
+          toast(t("saved"));
+          renderCleanup(a);
+        }).catch(showError);
+      });
+      box.appendChild(b);
+    });
+  }
+
   function renderAdmin(a) {
+    renderCleanup(a);
     renderTones(a);
     $("pairtitleinput").value = a.pair_title;
     $("pairtitleinput").placeholder = t("pair_placeholder");

@@ -122,3 +122,6 @@ textarea { resize: vertical; min-height: 72px; }
 .tones .check { flex: none; color: var(--link); font-weight: 700; width: 16px; text-align: center; }
 #pushbox { margin-top: 14px; text-align: left; }
 #pushbox select { margin-bottom: 0; flex: 1; min-width: 0; }
+.small.ok { color: var(--link); }
+.small.warn { color: var(--danger); }
+#cleanuphours { margin-top: 4px; }

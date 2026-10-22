@@ -31,6 +31,9 @@ class FakeBot:
         self._next_id += 1
         return SimpleNamespace(message_id=self._next_id)
 
+    async def me(self):
+        return SimpleNamespace(id=999, username="FakeBot")
+
     async def get_chat_member(self, chat_id, user_id):
         return SimpleNamespace(status=self.roles.get((chat_id, user_id), "left"))
 

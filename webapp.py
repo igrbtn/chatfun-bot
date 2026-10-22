@@ -17,10 +17,13 @@ from aiohttp import web
 import downloader
 import games
 from core import (
+    CLEANUP_CHOICES,
     PAIR_TITLE_KEY,
     PushError,
+    bot_can_delete,
     cfg,
     chat_tone,
+    cleanup_hours,
     deliver_video,
     game_title,
     is_chat_admin,
@@ -32,6 +35,7 @@ from core import (
     push_title,
     roll_hero,
     roll_pair,
+    set_cleanup_hours,
     set_tone,
     store,
     today,
@@ -165,7 +169,8 @@ def _push_info(chat_id: int, user_id: int, settings: dict) -> dict:
     day = today().isoformat()
     available = (
         settings["push"] and settings["hero"]
-        and store.pick_for(chat_id, day) == user_id and store.push_for(chat_id, day) is None
+        and (store.pick_for(chat_id, day) == user_id or store.has_bonus(chat_id, day, user_id))
+        and store.push_for(chat_id, day, user_id) is None
     )
     targets = [{"id": m.user_id, "name": m.name} for m in store.all_members(chat_id) if m.user_id != user_id]
     return {"available": available, "targets": targets if available else []}
@@ -282,6 +287,9 @@ async def admin_view(request: web.Request) -> web.Response:
         "hero_title": store.hero_title(chat_id) or "",
         "pair_title": store.custom_text(chat_id, PAIR_TITLE_KEY) or "",
         "tone": chat_tone(chat_id),
+        "cleanup_hours": cleanup_hours(chat_id),
+        "cleanup_choices": list(CLEANUP_CHOICES),
+        "bot_can_delete": await bot_can_delete(_bot(request), chat_id),
         "tones": [
             {"id": n, "name": raw("tone_names")[n], "sample": _plain(t(
                 "hero_reveal", random.Random(n), tone=n, mention=t("tone_sample_name"),
@@ -316,6 +324,15 @@ async def admin_title(request: web.Request) -> web.Response:
         "game_title": game_title(chat_id),
         "pair_title": store.custom_text(chat_id, PAIR_TITLE_KEY) or "",
     })
+
+
+async def admin_cleanup(request: web.Request) -> web.Response:
+    chat_id = await _chat(request, admin=True)
+    hours = (await _body(request)).get("hours")
+    if not isinstance(hours, int) or hours not in CLEANUP_CHOICES:
+        raise _json_error(400, "bad_hours")
+    set_cleanup_hours(chat_id, hours)
+    return web.json_response({"cleanup_hours": cleanup_hours(chat_id)})
 
 
 async def admin_tone(request: web.Request) -> web.Response:
@@ -403,6 +420,7 @@ def build_app(bot: Bot, index_html: str | None = None) -> web.Application:
         web.post("/api/chats/{chat_id}/admin/title", admin_title),
         web.post("/api/chats/{chat_id}/admin/players", admin_players),
         web.post("/api/chats/{chat_id}/admin/tone", admin_tone),
+        web.post("/api/chats/{chat_id}/admin/cleanup", admin_cleanup),
         web.post("/api/chats/{chat_id}/admin/members/{user_id}/remove", admin_remove_member),
         web.post("/api/chats/{chat_id}/admin/members/{user_id}", admin_member),
         web.post("/api/chats/{chat_id}/admin/reroll", admin_reroll),

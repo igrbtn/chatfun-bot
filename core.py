@@ -11,9 +11,10 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from aiogram import Bot
+from aiogram.client.session.middlewares.base import BaseRequestMiddleware
 from aiogram.enums import ChatAction, ChatMemberStatus
 from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
-from aiogram.types import FSInputFile, ReplyParameters, User
+from aiogram.types import FSInputFile, Message, ReplyParameters, User
 
 import config
 import downloader
@@ -280,27 +281,31 @@ class PushError(Exception):
 
 
 async def push_title(bot: Bot, chat_id: int, hero_id: int, victim_id: int, reply_to: int | None = None) -> bool:
-    """Today's hero tries once to push the title onto someone, with activity-based odds shown up front.
-    Success moves today's pick to the victim; failure gives the hero a double win. Returns success."""
+    """Anyone who got a point today (the daily pick or a bonus from a tie) tries once to push it onto
+    someone, with activity-based odds shown up front. Success hands that point to the victim; failure
+    gives the pusher a double. Returns success."""
     settings = store.settings(chat_id)
     if not (settings["push"] and settings["hero"]):
         raise PushError("off")
     day = today().isoformat()
-    if store.pick_for(chat_id, day) != hero_id:
+    holds_pick = store.pick_for(chat_id, day) == hero_id
+    if not holds_pick and not store.has_bonus(chat_id, day, hero_id):
         raise PushError("not_hero")
     if victim_id == hero_id:
         raise PushError("self")
     if store.member(chat_id, victim_id) is None:
         raise PushError("unknown")
-    if store.push_for(chat_id, day) is not None:
+    if store.push_for(chat_id, day, hero_id) is not None:
         raise PushError("used")
     weights = activity_weights(chat_id)
     chance = hero.push_success_chance(weights.get(hero_id, 1.0), weights.get(victim_id, 1.0))
     success = rng.random() < chance
     if not store.save_push(chat_id, day, hero_id, victim_id, victim_id if success else hero_id):
         raise PushError("used")
-    if success:
+    if success and holds_pick:
         store.transfer_pick(chat_id, day, victim_id)
+    elif success:
+        store.move_bonus(chat_id, day, hero_id, victim_id)
 
     pct = round(chance * 100)
     story = [tt(chat_id, "push_call", rng, hero=winner_mention(chat_id, hero_id),
@@ -532,10 +537,51 @@ async def deliver_video(
         shutil.rmtree(workdir, ignore_errors=True)
 
 
+CLEANUP_HOURS_KEY = "cleanup_hours"
+CLEANUP_CHOICES = (0, 1, 6, 24, 47)  # Telegram lets bots delete messages only within 48 hours
+COMMAND_TTL = 30                     # seconds before a /command to the bot is removed (when enabled)
+
+
+def cleanup_hours(chat_id: int) -> int:
+    value = store.custom_text(chat_id, CLEANUP_HOURS_KEY)
+    return value if value in CLEANUP_CHOICES else 0
+
+
+def set_cleanup_hours(chat_id: int, hours: int) -> None:
+    store.set_custom_text(chat_id, CLEANUP_HOURS_KEY, hours if hours in CLEANUP_CHOICES and hours else None)
+
+
+async def bot_can_delete(bot: Bot, chat_id: int) -> bool:
+    """Both cleanups need the bot to be a group admin with the "delete messages" right."""
+    try:
+        me = await bot.me()
+        member = await bot.get_chat_member(chat_id, me.id)
+    except TelegramAPIError:
+        return False
+    return member.status == ChatMemberStatus.CREATOR or bool(getattr(member, "can_delete_messages", False))
+
+
+class RecordSent(BaseRequestMiddleware):
+    """Remembers every message the bot sends to a group, so old ones can be cleaned up later.
+    Edits are not new messages and are skipped."""
+
+    async def __call__(self, make_request, bot, method):
+        response = await make_request(bot, method)
+        result = getattr(response, "result", None)
+        sent = type(method).__name__.startswith(("Send", "Copy", "Forward"))
+        if sent and isinstance(result, Message) and result.chat.id < 0:
+            store.remember_new(result.chat.id, result.message_id, "out", time.time())
+        return response
+
+
 async def sweeper(bot: Bot) -> None:
     """Deletes scheduled bot messages; on start, statuses orphaned by a crash/restart go first."""
     store.orphan_statuses(time.time())
     while True:
+        for chat_id, _title in store.all_chats():
+            hours = cleanup_hours(chat_id)
+            if hours:
+                store.expire_older_than(chat_id, time.time() - hours * 3600, time.time())
         for chat_id, message_id in store.due_for_delete(time.time()):
             await _safe_delete(bot, chat_id, message_id)
         for chat_id, key, message_id, options in store.due_tie_polls(time.time()):

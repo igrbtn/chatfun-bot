@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS hero_pushes (
     hero INTEGER NOT NULL,
     victim INTEGER NOT NULL,
     winner INTEGER NOT NULL,
-    PRIMARY KEY (chat_id, day)
+    PRIMARY KEY (chat_id, day, hero)
 );
 CREATE TABLE IF NOT EXISTS duels (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,6 +101,7 @@ DEFAULT_SETTINGS = {
     "chatter": True,        # answer when someone replies to or mentions the bot
     "weighted": True,       # daily pick odds grow with recent activity
     "push": True,           # today's hero may try once to push the title onto someone (/push)
+    "cleanup_commands": False,  # delete people's /commands to the bot shortly after answering (needs admin rights)
 }
 
 
@@ -128,7 +129,18 @@ class Store:
         columns = {row[1] for row in self.db.execute("PRAGMA table_info(members)")}
         if "username" not in columns:
             self.db.execute("ALTER TABLE members ADD COLUMN username TEXT")
+        self._widen_push_key()
         self._repair_orphans()
+
+    def _widen_push_key(self) -> None:
+        """0.13 allowed one /push per chat per day; now it is one per person per day (bonus holders push too)."""
+        sql = self.db.execute("SELECT sql FROM sqlite_master WHERE name = 'hero_pushes'").fetchone()[0]
+        if "PRIMARY KEY (chat_id, day, hero)" in sql:
+            return
+        self.db.execute("ALTER TABLE hero_pushes RENAME TO hero_pushes_old")
+        self.db.executescript(SCHEMA)
+        self.db.execute("INSERT INTO hero_pushes SELECT chat_id, day, hero, victim, winner FROM hero_pushes_old")
+        self.db.execute("DROP TABLE hero_pushes_old")
 
     # --- chats ---------------------------------------------------------
 
@@ -396,14 +408,35 @@ class Store:
     def transfer_pick(self, chat_id: int, day: str, user_id: int) -> None:
         self.db.execute("UPDATE picks SET user_id = ? WHERE chat_id = ? AND day = ?", (user_id, chat_id, day))
 
-    def push_for(self, chat_id: int, day: str) -> dict | None:
+    def push_for(self, chat_id: int, day: str, hero: int) -> dict | None:
         row = self.db.execute(
-            "SELECT hero, victim, winner FROM hero_pushes WHERE chat_id = ? AND day = ?", (chat_id, day)
+            "SELECT hero, victim, winner FROM hero_pushes WHERE chat_id = ? AND day = ? AND hero = ?",
+            (chat_id, day, hero),
         ).fetchone()
         return {"hero": row[0], "victim": row[1], "winner": row[2]} if row else None
 
+    def has_bonus(self, chat_id: int, day: str, user_id: int) -> bool:
+        return self.db.execute(
+            "SELECT 1 FROM hero_bonus WHERE chat_id = ? AND day = ? AND user_id = ?", (chat_id, day, user_id)
+        ).fetchone() is not None
+
+    def move_bonus(self, chat_id: int, day: str, from_user: int, to_user: int) -> bool:
+        """Hand one of today's bonus points over (a successful /push by a bonus holder)."""
+        return self.db.execute(
+            "UPDATE OR IGNORE hero_bonus SET user_id = ? WHERE rowid = (SELECT rowid FROM hero_bonus "
+            "WHERE chat_id = ? AND day = ? AND user_id = ? LIMIT 1)",
+            (to_user, chat_id, day, from_user),
+        ).rowcount == 1
+
+    def member_by_username(self, chat_id: int, username: str) -> int | None:
+        row = self.db.execute(
+            "SELECT user_id FROM members WHERE chat_id = ? AND lower(username) = lower(?) ORDER BY user_id DESC",
+            (chat_id, username.lstrip("@")),
+        ).fetchone()
+        return row[0] if row else None
+
     def save_push(self, chat_id: int, day: str, hero: int, victim: int, winner: int) -> bool:
-        """One push attempt per chat per day; False if it was already used."""
+        """One push attempt per person per day; False if it was already used."""
         return self.db.execute(
             "INSERT OR IGNORE INTO hero_pushes (chat_id, day, hero, victim, winner) VALUES (?, ?, ?, ?, ?)",
             (chat_id, day, hero, victim, winner),
@@ -426,6 +459,21 @@ class Store:
             "VALUES (?, ?, ?, ?, ?)",
             (chat_id, message_id, kind, now, delete_at),
         )
+
+    def remember_new(self, chat_id: int, message_id: int, kind: str, now: float) -> None:
+        """Record a sent message unless it is already tracked (keeps an existing kind / scheduled deletion)."""
+        self.db.execute(
+            "INSERT OR IGNORE INTO bot_messages (chat_id, message_id, kind, created_at) VALUES (?, ?, ?, ?)",
+            (chat_id, message_id, kind, now),
+        )
+
+    def expire_older_than(self, chat_id: int, older_than: float, now: float) -> int:
+        """Mark tracked bot messages sent before `older_than` for deletion now. Returns how many."""
+        return self.db.execute(
+            "UPDATE bot_messages SET delete_at = ? WHERE chat_id = ? AND created_at < ? AND delete_at IS NULL "
+            "AND kind != 'command'",
+            (now, chat_id, older_than),
+        ).rowcount
 
     def forget(self, chat_id: int, message_id: int) -> None:
         self.db.execute("DELETE FROM bot_messages WHERE chat_id = ? AND message_id = ?", (chat_id, message_id))

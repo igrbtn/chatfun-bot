@@ -58,8 +58,12 @@ def test_push_success_moves_title(env, monkeypatch):
     assert store.pick_for(CHAT, day) == 2
     assert store.top(CHAT) == [(2, "Bob", 1)]
     with pytest.raises(core.PushError) as err:
-        asyncio.run(core.push_title(bot, CHAT, 2, 3))
-    assert err.value.code == "used"  # one attempt per chat per day
+        asyncio.run(core.push_title(bot, CHAT, 1, 3))
+    assert err.value.code == "not_hero"  # the title is gone, nothing left to push
+    assert asyncio.run(core.push_title(bot, CHAT, 2, 3)) is True  # hot potato: the new holder may push once
+    with pytest.raises(core.PushError) as err:
+        asyncio.run(core.push_title(bot, CHAT, 2, 1))
+    assert err.value.code == "not_hero"  # 2 already passed it on to 3
     edits = [e[2] for e in bot.edits]
     assert edits and edits[-1].count("\n") == 2  # call, fight, result in one message
 
@@ -105,3 +109,43 @@ def test_milestones(env):
     store.save_pick(CHAT, day.isoformat(), 2)
     line = core.milestone_line(CHAT, 2)  # 5th win -> count milestone
     assert line and "5" in line
+
+
+def test_bonus_holder_can_push_their_point(env, monkeypatch):
+    store, bot = env
+    day = core.today().isoformat()
+    store.save_pick(CHAT, day, 1)
+    store.add_bonus(CHAT, day, 3, "tie")  # 3 won a tie today
+    monkeypatch.setattr(core.rng, "random", lambda: 0.0)
+    assert asyncio.run(core.push_title(bot, CHAT, 3, 2)) is True
+    assert store.pick_for(CHAT, day) == 1  # the daily pick is untouched
+    assert {uid: n for uid, _, n in store.top(CHAT)} == {1: 1, 2: 1}  # the bonus moved from 3 to 2
+    with pytest.raises(core.PushError) as err:
+        asyncio.run(core.push_title(bot, CHAT, 3, 1))
+    assert err.value.code in ("used", "not_hero")
+
+
+def test_push_target_by_username(env):
+    store, _ = env
+    store.touch(CHAT, 2, "Bob", username="Some_User13")
+    from types import SimpleNamespace
+
+    msg = SimpleNamespace(reply_to_message=None, entities=None, text="/push@Bot @some_user13")
+    assert handlers.push_target(msg, CHAT) == 2
+    msg.text = "/push @nobody_here"
+    assert handlers.push_target(msg, CHAT) is None
+
+
+def test_old_push_table_is_migrated(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    db = sqlite3.connect(path)
+    db.execute("CREATE TABLE hero_pushes (chat_id INTEGER NOT NULL, day TEXT NOT NULL, hero INTEGER NOT NULL, "
+               "victim INTEGER NOT NULL, winner INTEGER NOT NULL, PRIMARY KEY (chat_id, day))")
+    db.execute("INSERT INTO hero_pushes VALUES (-1, '2026-10-22', 1, 2, 1)")
+    db.commit()
+    db.close()
+    s = Store(path)
+    assert s.push_for(-1, "2026-10-22", 1) == {"hero": 1, "victim": 2, "winner": 1}
+    assert s.save_push(-1, "2026-10-22", 2, 1, 2)  # another person may push the same day now

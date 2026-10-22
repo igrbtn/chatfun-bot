@@ -204,3 +204,13 @@ def test_push_endpoint(env):
     status, data = call(bot, USER, "POST", f"/api/chats/{CHAT}/push", {"victim": ADMIN})
     assert status == 200 and isinstance(data["success"], bool)
     assert call(bot, USER, "POST", f"/api/chats/{CHAT}/push", {"victim": ADMIN})[0] == 409
+
+
+def test_admin_cleanup_settings(env):
+    _, bot = env
+    data = call(bot, ADMIN, "GET", f"/api/chats/{CHAT}/admin")[1]
+    assert data["cleanup_hours"] == 0 and data["bot_can_delete"] is False and 47 in data["cleanup_choices"]
+    assert data["settings"]["cleanup_commands"] is False
+    assert call(bot, USER, "POST", f"/api/chats/{CHAT}/admin/cleanup", {"hours": 1})[0] == 403
+    assert call(bot, ADMIN, "POST", f"/api/chats/{CHAT}/admin/cleanup", {"hours": 168})[0] == 400
+    assert call(bot, ADMIN, "POST", f"/api/chats/{CHAT}/admin/cleanup", {"hours": 24})[1] == {"cleanup_hours": 24}
