@@ -183,3 +183,37 @@ def test_quiet_name_never_pings():
         assert core.winner_mention(-1, 5) == "@ann_k"  # first announcements still ping
     finally:
         core.store = real
+
+
+def test_merging_placeholder_moves_pairs_and_duels():
+    s = Store(":memory:")
+    s.add_manual(-1, ["bobby"], [])
+    placeholder = s.all_members(-1)[0].user_id
+    s.touch(-1, 5, "Ann")
+    s.save_pair(-1, "2026-10-01", placeholder, 5)
+    d = s.create_duel(-1, placeholder, 5, 0.0)
+    s.finish_duel(d, "done", opponent=5, winner=placeholder)
+    s.touch(-1, 99, "Bobby Real", username="bobby")
+    assert s.pair_top(-1) == [(5, 99, 1)]
+    assert s.duel(d)["challenger"] == 99 and s.duel(d)["winner"] == 99
+
+
+def test_orphans_from_old_versions_are_repaired(tmp_path):
+    from storage import manual_id
+
+    path = tmp_path / "old.db"
+    s = Store(path)
+    s.touch(-1, 5, "Ann")
+    s.touch(-1, 99, "Bobby", username="Bobby")
+    orphan = manual_id("u:bobby")
+    s.save_pair(-1, "2026-10-01", orphan, 5)  # what an old merge left behind
+    s.db.close()
+    repaired = Store(path)
+    assert repaired.pair_top(-1) == [(5, 99, 1)]
+
+
+def test_list_names_do_not_ping():
+    import handlers
+
+    assert handlers.list_name("@Shtnrs") == "Shtnrs"
+    assert handlers.list_name("Ann") == "Ann"

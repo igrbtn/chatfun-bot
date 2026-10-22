@@ -64,3 +64,17 @@ def test_draw_goes_to_previous_leader_and_setting_off(env):
     (chat, key, mid, options), = store.due_tie_polls(10**12)
     asyncio.run(core.close_tie_poll(bot, chat, key, mid, options))
     assert "<b>Cid</b>" in bot.sent[-1][2] or "tg://user?id=3" in bot.sent[-1][2]
+
+
+def test_closed_poll_is_deleted_and_winner_gets_a_point(env):
+    store, bot = env
+    store.save_pick(CHAT, "2026-10-01", 1)
+    store.save_pick(CHAT, "2026-10-02", 2)
+    asyncio.run(core.maybe_tie_poll(bot, CHAT))
+    bot.poll_votes = [0, 2]
+    (chat, key, mid, options), = store.due_tie_polls(10**12)
+    asyncio.run(core.close_tie_poll(bot, chat, key, mid, options))
+    assert (CHAT, mid) in bot.deleted
+    assert store.leaders(CHAT) == (2, [2])  # tie broken by the +1
+    assert {uid: n for uid, _, n in store.top(CHAT)} == {1: 1, 2: 2}
+    assert not asyncio.run(core.maybe_tie_poll(bot, CHAT))  # no new poll: nobody shares first place

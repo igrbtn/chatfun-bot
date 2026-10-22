@@ -371,12 +371,19 @@ async def close_tie_poll(bot: Bot, chat_id: int, state_key: str, message_id: int
         counts = []  # poll deleted: nobody's votes to count
     store.close_tie_poll(chat_id, state_key)
     winner, by_votes = poll_winner(options, counts)
-    text = tt(chat_id, "tie_winner" if by_votes else "tie_winner_draw", mention=winner_mention(chat_id, winner),
-             **title_vars(chat_id))
+    # The winner gets +1 so the tie is really broken; the poll itself is removed to keep the chat clean.
+    store.add_bonus(chat_id, today().isoformat(), winner, "tie")
+    mention_ = winner_mention(chat_id, winner)
+    text = "\n".join([
+        tt(chat_id, "tie_winner" if by_votes else "tie_winner_draw", mention=mention_, **title_vars(chat_id)),
+        tt(chat_id, "tie_bonus", rng, mention=quiet_name(chat_id, winner)),
+    ])
     try:
-        await bot.send_message(
-            chat_id, text, reply_parameters=ReplyParameters(message_id=message_id, allow_sending_without_reply=True)
-        )
+        await bot.delete_message(chat_id, message_id)
+    except TelegramAPIError:
+        pass  # no rights to delete or already gone: the result still goes out
+    try:
+        await bot.send_message(chat_id, text)
     except TelegramAPIError:
         log.warning("tie poll result for chat %s not delivered", chat_id)
 

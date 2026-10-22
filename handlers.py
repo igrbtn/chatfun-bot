@@ -269,7 +269,7 @@ async def cmd_top(message: Message) -> None:
         await service_reply(message, t("top_empty"))
         return
     lines = [t("top_title", **title_vars(message.chat.id))] + [
-        t("top_row", place=i, name=html.escape(name), count=n) for i, (_, name, n) in enumerate(rows, 1)
+        t("top_row", place=i, name=html.escape(list_name(name)), count=n) for i, (_, name, n) in enumerate(rows, 1)
     ]
     await message.reply("\n".join(lines))
 
@@ -286,6 +286,11 @@ def entity_links(message: Message) -> list[str]:
                 url = e.extract_from(text)
                 links.append(url if "://" in url else f"https://{url}")
     return links
+
+
+def list_name(name: str) -> str:
+    """Names in lists must not ping: "@user" (manual players) would become a mention in Telegram."""
+    return name.lstrip("@")
 
 
 async def feature_on(message: Message, key: str) -> bool:
@@ -311,7 +316,7 @@ async def cmd_stats(message: Message, command: CommandObject) -> None:
         await service_reply(message, t("stats_empty"))
         return
     lines = [t("stats_title", period=t(f"period_{period}"), total=total)] + [
-        t("top_row", place=i, name=html.escape(name), count=n) for i, (_, name, n) in enumerate(rows, 1)
+        t("top_row", place=i, name=html.escape(list_name(name)), count=n) for i, (_, name, n) in enumerate(rows, 1)
     ]
     await message.reply("\n".join(lines))
 
@@ -374,7 +379,7 @@ async def cmd_pairs(message: Message) -> None:
         return
     names = {m.user_id: m.name for m in store.all_members(chat_id)}
     lines = [t("pairs_title", **pair_vars(chat_id))] + [
-        t("pair_row", place=i, a=html.escape(names.get(a, str(a))), b=html.escape(names.get(b, str(b))), count=n)
+        t("pair_row", place=i, a=html.escape(list_name(names.get(a, str(a)))), b=html.escape(list_name(names.get(b, str(b)))), count=n)
         for i, (a, b, n) in enumerate(rows, 1)
     ]
     await message.reply("\n".join(lines))
@@ -478,7 +483,7 @@ async def cmd_duels(message: Message) -> None:
         await service_reply(message, t("duels_empty"))
         return
     lines = [t("duels_title")] + [
-        t("duel_row", place=i, name=html.escape(name), wins=w, losses=lo) for i, (_, name, w, lo) in enumerate(rows, 1)
+        t("duel_row", place=i, name=html.escape(list_name(name)), wins=w, losses=lo) for i, (_, name, w, lo) in enumerate(rows, 1)
     ]
     await message.reply("\n".join(lines))
 

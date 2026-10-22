@@ -55,6 +55,13 @@ CREATE TABLE IF NOT EXISTS pair_picks (
     user_b INTEGER NOT NULL,
     PRIMARY KEY (chat_id, day)
 );
+CREATE TABLE IF NOT EXISTS hero_bonus (
+    chat_id INTEGER NOT NULL,
+    day TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    PRIMARY KEY (chat_id, day, user_id, reason)
+);
 CREATE TABLE IF NOT EXISTS hero_pushes (
     chat_id INTEGER NOT NULL,
     day TEXT NOT NULL,
@@ -121,6 +128,7 @@ class Store:
         columns = {row[1] for row in self.db.execute("PRAGMA table_info(members)")}
         if "username" not in columns:
             self.db.execute("ALTER TABLE members ADD COLUMN username TEXT")
+        self._repair_orphans()
 
     # --- chats ---------------------------------------------------------
 
@@ -219,6 +227,43 @@ class Store:
             "DELETE FROM members WHERE chat_id = ? AND user_id = ?", (chat_id, user_id)
         ).rowcount == 1
 
+    def _move_user(self, chat_id: int, old: int, new: int) -> None:
+        """Re-point every record of `old` to `new` (placeholder -> real account): wins, pairs, duels, bonuses."""
+        updates = [
+            ("picks", "user_id"), ("pair_picks", "user_a"), ("pair_picks", "user_b"),
+            ("hero_pushes", "hero"), ("hero_pushes", "victim"), ("hero_pushes", "winner"),
+            ("duels", "challenger"), ("duels", "target"), ("duels", "opponent"), ("duels", "winner"),
+        ]
+        for table, column in updates:
+            self.db.execute(
+                f"UPDATE {table} SET {column} = ? WHERE chat_id = ? AND {column} = ?", (new, chat_id, old)
+            )
+        # Pairs are stored ordered (user_a < user_b); the swap uses the old values on both sides.
+        self.db.execute("UPDATE pair_picks SET user_a = user_b, user_b = user_a WHERE chat_id = ? AND user_a > user_b",
+                        (chat_id,))
+        self.db.execute("UPDATE OR IGNORE hero_bonus SET user_id = ? WHERE chat_id = ? AND user_id = ?",
+                        (new, chat_id, old))
+        self.db.execute("DELETE FROM hero_bonus WHERE chat_id = ? AND user_id = ?", (chat_id, old))
+
+    def _repair_orphans(self) -> None:
+        """Records of merged placeholders that older versions forgot to re-point (pairs, duels): the
+        placeholder id is derived from the username, so the real account can still be found."""
+        by_placeholder = {}
+        for chat_id, user_id, username in self.db.execute(
+            "SELECT chat_id, user_id, username FROM members WHERE user_id > 0 AND username IS NOT NULL"
+        ):
+            by_placeholder[(chat_id, manual_id("u:" + username.lower()))] = user_id
+        orphans = self.db.execute(
+            "SELECT chat_id, user_a FROM pair_picks WHERE user_a < 0 UNION SELECT chat_id, user_b FROM pair_picks "
+            "WHERE user_b < 0 UNION SELECT chat_id, user_id FROM picks WHERE user_id < 0 "
+            "UNION SELECT chat_id, challenger FROM duels WHERE challenger < 0"
+        ).fetchall()
+        for chat_id, old in orphans:
+            real = by_placeholder.get((chat_id, old))
+            exists = self.db.execute("SELECT 1 FROM members WHERE chat_id = ? AND user_id = ?", (chat_id, old)).fetchone()
+            if real and not exists:
+                self._move_user(chat_id, old, real)
+
     def _claim_manual(self, chat_id: int, user_id: int, username: str) -> None:
         """A real user with a pre-added @username shows up: move the placeholder's wins and state."""
         row = self.db.execute(
@@ -228,9 +273,7 @@ class Store:
         if row is None:
             return
         placeholder, active = row
-        self.db.execute(
-            "UPDATE picks SET user_id = ? WHERE chat_id = ? AND user_id = ?", (user_id, chat_id, placeholder)
-        )
+        self._move_user(chat_id, placeholder, user_id)
         has_real = self.db.execute(
             "SELECT 1 FROM members WHERE chat_id = ? AND user_id = ?", (chat_id, user_id)
         ).fetchone()
@@ -313,12 +356,22 @@ class Store:
 
     def reset_scores(self, chat_id: int) -> int:
         self.db.execute("DELETE FROM hero_pushes WHERE chat_id = ?", (chat_id,))
+        self.db.execute("DELETE FROM hero_bonus WHERE chat_id = ?", (chat_id,))
         return self.db.execute("DELETE FROM picks WHERE chat_id = ?", (chat_id,)).rowcount
 
-    # Every win as (user_id, day): daily picks plus the "double" a hero earns by failing to push the title away.
+    def add_bonus(self, chat_id: int, day: str, user_id: int, reason: str) -> bool:
+        """+1 to the score (e.g. won a tie poll). One bonus per person, day and reason."""
+        return self.db.execute(
+            "INSERT OR IGNORE INTO hero_bonus (chat_id, day, user_id, reason) VALUES (?, ?, ?, ?)",
+            (chat_id, day, user_id, reason),
+        ).rowcount == 1
+
+    # Every win as (user_id, day): daily picks, the "double" a hero earns by failing to push the title away,
+    # and bonus points (tie polls).
     SCORES = (
         "SELECT user_id, day FROM picks WHERE chat_id = :chat "
-        "UNION ALL SELECT hero AS user_id, day FROM hero_pushes WHERE chat_id = :chat AND winner = hero"
+        "UNION ALL SELECT hero AS user_id, day FROM hero_pushes WHERE chat_id = :chat AND winner = hero "
+        "UNION ALL SELECT user_id, day FROM hero_bonus WHERE chat_id = :chat"
     )
 
     def top(self, chat_id: int, limit: int = 10) -> list[tuple[int, str, int]]:
