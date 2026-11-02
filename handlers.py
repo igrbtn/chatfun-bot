@@ -77,13 +77,33 @@ def command_allowed(chat_id: int, user_id: int, now: float) -> bool:
     return True
 
 
+OWN_COMMANDS = None  # filled lazily from texts.yaml "commands" + start/help
+
+
+def is_own_command(text: str, bot_username: str) -> bool:
+    """"/cmd@OurBot" or a bare "/cmd" that is one of ours. Commands for other bots ("/future@OtherBot")
+    and unknown bare commands are none of our business: never rate-limited, never deleted."""
+    global OWN_COMMANDS
+    if not text.startswith("/"):
+        return False
+    head = text.split()[0][1:]
+    name, _, target = head.partition("@")
+    if target:
+        return target.lower() == bot_username.lower()
+    if OWN_COMMANDS is None:
+        OWN_COMMANDS = {c.lower() for c in raw("commands")} | {"start", "help"}
+    return name.lower() in OWN_COMMANDS
+
+
 class AntiFlood(BaseMiddleware):
-    """Drops a person's commands that come too fast in a group; the spam itself is deleted if the bot may."""
+    """Drops a person's commands to this bot that come too fast in a group; the spam itself is deleted if the bot may."""
 
     async def __call__(self, handler, event: Message, data):
         text = event.text or event.caption or ""
         user = event.from_user
-        if event.chat.type in GROUPS and text.startswith("/") and user and not user.is_bot:
+        bot = data.get("bot")
+        username = (await bot.me()).username if bot else ""
+        if event.chat.type in GROUPS and is_own_command(text, username) and user and not user.is_bot:
             now = time.time()
             if not command_allowed(event.chat.id, user.id, now):
                 log.info("antiflood: dropped command in chat %s from %s", event.chat.id, user.id)

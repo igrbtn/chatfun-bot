@@ -79,3 +79,27 @@ def test_commands_scheduled_only_when_enabled(store):
     asyncio.run(handlers.AntiFlood()(handler, msg, {}))
     assert store.messages(CHAT) == [(77, "command")]
     assert store.due_for_delete(10**12) == [(CHAT, 77)]
+
+
+def test_only_own_commands_are_touched(store):
+    assert handlers.is_own_command("/hero", "ChatFunBot")
+    assert handlers.is_own_command("/duel@ChatFunBot", "ChatFunBot")
+    assert handlers.is_own_command("/whatever@blablamini_bot", "ChatFunBot")
+    assert not handlers.is_own_command("/future@OtherBot", "ChatFunBot")
+    assert not handlers.is_own_command("/pidor@ThirdBot", "ChatFunBot")
+    assert not handlers.is_own_command("/future", "ChatFunBot")  # bare but not ours
+
+    async def handler(event, data):
+        pass
+
+    class Bot:
+        async def me(self):
+            return SimpleNamespace(username="ChatFunBot")
+
+    store.update_settings(CHAT, {"cleanup_commands": True})
+    for n in range(5):  # someone spams another bot: no rate limit, no deletion
+        msg = SimpleNamespace(text="/future@OtherBot", caption=None, message_id=200 + n,
+                              chat=SimpleNamespace(id=CHAT, type="supergroup"),
+                              from_user=SimpleNamespace(id=1, is_bot=False))
+        asyncio.run(handlers.AntiFlood()(handler, msg, {"bot": Bot()}))
+    assert store.messages(CHAT) == []
