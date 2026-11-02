@@ -84,7 +84,7 @@ def test_commands_scheduled_only_when_enabled(store):
 def test_only_own_commands_are_touched(store):
     assert handlers.is_own_command("/hero", "ChatFunBot")
     assert handlers.is_own_command("/duel@ChatFunBot", "ChatFunBot")
-    assert handlers.is_own_command("/whatever@blablamini_bot", "ChatFunBot")
+    assert handlers.is_own_command("/whatever@chatfunbot", "ChatFunBot")
     assert not handlers.is_own_command("/future@OtherBot", "ChatFunBot")
     assert not handlers.is_own_command("/pidor@ThirdBot", "ChatFunBot")
     assert not handlers.is_own_command("/future", "ChatFunBot")  # bare but not ours
