@@ -118,5 +118,15 @@
   "hours_n": "{n} ч",
   "set_cleanup_commands": "Удалять команды боту через 30 секунд",
   "err_bad_hours": "Недопустимый срок",
-  "day_points": "Очки за сегодня: {list}"
+  "day_points": "Очки за сегодня: {list}",
+  "cleanup_stats": "Удалено сегодня: {today}{kinds}, не удалось: {failed}. Всего удалено: {total}.",
+  "kind_command": "команды",
+  "kind_out": "старые сообщения бота",
+  "kind_service": "служебные ответы",
+  "kind_status": "статусы загрузки",
+  "kind_spam": "спам",
+  "kind_error": "ошибки",
+  "kind_video": "видео",
+  "kind_push": "спихивания",
+  "kind_other": "прочее"
 }

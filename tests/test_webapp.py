@@ -225,3 +225,11 @@ def test_today_shows_the_champion_not_the_pick(env):
     view = call(bot, USER, "GET", f"/api/chats/{CHAT}")[1]
     assert view["today"]["id"] == ADMIN and view["rolled"] is True
     assert [p["count"] for p in view["today_points"]] == [2, 1]
+
+
+def test_admin_sees_deletion_stats(env):
+    store, bot = env
+    store.count_deletion(CHAT, core.today().isoformat(), "command", True)
+    store.count_deletion(CHAT, "2026-01-01", "out", True)
+    stats = call(bot, ADMIN, "GET", f"/api/chats/{CHAT}/admin")[1]["cleanup_stats"]
+    assert stats["today"]["deleted"] == 1 and stats["total"]["deleted"] == 2

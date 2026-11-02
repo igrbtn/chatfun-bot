@@ -295,6 +295,7 @@ async def admin_view(request: web.Request) -> web.Response:
         "cleanup_hours": cleanup_hours(chat_id),
         "cleanup_choices": list(CLEANUP_CHOICES),
         "bot_can_delete": await bot_can_delete(_bot(request), chat_id),
+        "cleanup_stats": store.deletion_stats(chat_id, today().isoformat()),
         "tones": [
             {"id": n, "name": raw("tone_names")[n], "sample": _plain(t(
                 "hero_reveal", random.Random(n), tone=n, mention=t("tone_sample_name"),

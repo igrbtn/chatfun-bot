@@ -103,3 +103,28 @@ def test_only_own_commands_are_touched(store):
                               from_user=SimpleNamespace(id=1, is_bot=False))
         asyncio.run(handlers.AntiFlood()(handler, msg, {"bot": Bot()}))
     assert store.messages(CHAT) == []
+
+
+def test_deletions_are_counted(store):
+    class Bot:
+        def __init__(self):
+            self.fail = set()
+
+        async def delete_message(self, chat_id, message_id):
+            from aiogram.exceptions import TelegramBadRequest
+
+            if message_id in self.fail:
+                raise TelegramBadRequest(method=None, message="message can't be deleted")
+
+    bot = Bot()
+    bot.fail = {3}
+    store.remember(CHAT, 1, "command", 0.0, delete_at=0.0)
+    store.remember(CHAT, 2, "push:42", 0.0, delete_at=0.0)
+    store.remember(CHAT, 3, "out", 0.0, delete_at=0.0)
+    store.remember(42, 4, "status", 0.0, delete_at=0.0)  # private chat: not counted
+    results = [asyncio.run(core._safe_delete(bot, c, m)) for c, m in store.due_for_delete(10**12)]
+    assert sorted(results) == [("command", True), ("out", False), ("push", True), ("status", True)]
+    stats = store.deletion_stats(CHAT, core.today().isoformat())
+    assert stats["today"] == {"deleted": 2, "failed": 1, "by_kind": {"command": 1, "push": 1}}
+    assert stats["total"] == {"deleted": 2, "failed": 1}
+    assert store.messages(CHAT) == []  # forgotten either way

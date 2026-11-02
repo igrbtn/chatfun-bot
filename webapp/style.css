@@ -125,3 +125,4 @@ textarea { resize: vertical; min-height: 72px; }
 .small.ok { color: var(--link); }
 .small.warn { color: var(--danger); }
 #cleanuphours { margin-top: 4px; }
+.stats-line { margin: 12px 0 0; }

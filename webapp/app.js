@@ -302,6 +302,14 @@
   }
 
   function renderCleanup(a) {
+    var st = a.cleanup_stats;
+    var kinds = Object.keys(st.today.by_kind).map(function (k) {
+      return (S["kind_" + k] || k) + " " + st.today.by_kind[k];
+    }).join(", ");
+    $("cleanupstats").textContent = t("cleanup_stats", {
+      today: st.today.deleted, kinds: kinds ? " (" + kinds + ")" : "", failed: st.today.failed,
+      total: st.total.deleted
+    });
     $("cleanuprights").textContent = t(a.bot_can_delete ? "cleanup_rights_ok" : "cleanup_rights_no");
     $("cleanuprights").className = "small " + (a.bot_can_delete ? "ok" : "warn");
     var box = $("cleanuphours");

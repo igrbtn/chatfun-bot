@@ -55,6 +55,14 @@ CREATE TABLE IF NOT EXISTS pair_picks (
     user_b INTEGER NOT NULL,
     PRIMARY KEY (chat_id, day)
 );
+CREATE TABLE IF NOT EXISTS cleanup_stats (
+    chat_id INTEGER NOT NULL,
+    day TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    deleted INTEGER NOT NULL DEFAULT 0,
+    failed INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (chat_id, day, kind)
+);
 CREATE TABLE IF NOT EXISTS hero_bonus (
     chat_id INTEGER NOT NULL,
     day TEXT NOT NULL,
@@ -486,6 +494,34 @@ class Store:
             "AND kind != 'command'",
             (now, chat_id, older_than),
         ).rowcount
+
+    def count_deletion(self, chat_id: int, day: str, kind: str, ok: bool) -> None:
+        """One deletion attempt by the bot (ok=False: no rights, too old or already gone)."""
+        self.db.execute(
+            "INSERT INTO cleanup_stats (chat_id, day, kind, deleted, failed) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT (chat_id, day, kind) DO UPDATE SET deleted = deleted + excluded.deleted, "
+            "failed = failed + excluded.failed",
+            (chat_id, day, kind, int(ok), int(not ok)),
+        )
+
+    def deletion_stats(self, chat_id: int, day: str) -> dict:
+        """{"today": {"deleted", "failed", "by_kind"}, "total": {"deleted", "failed"}}."""
+        today_rows = self.db.execute(
+            "SELECT kind, deleted, failed FROM cleanup_stats WHERE chat_id = ? AND day = ? ORDER BY deleted DESC",
+            (chat_id, day),
+        ).fetchall()
+        total = self.db.execute(
+            "SELECT COALESCE(SUM(deleted), 0), COALESCE(SUM(failed), 0) FROM cleanup_stats WHERE chat_id = ?",
+            (chat_id,),
+        ).fetchone()
+        return {
+            "today": {
+                "deleted": sum(r[1] for r in today_rows),
+                "failed": sum(r[2] for r in today_rows),
+                "by_kind": {k: d for k, d, _ in today_rows if d},
+            },
+            "total": {"deleted": total[0], "failed": total[1]},
+        }
 
     def kind_of(self, chat_id: int, message_id: int) -> str | None:
         row = self.db.execute(

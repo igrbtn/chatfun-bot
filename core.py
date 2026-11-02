@@ -7,6 +7,7 @@ import re
 import shutil
 import tempfile
 import time
+from collections import Counter
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -447,12 +448,18 @@ def render_status(
     return "\n".join(lines)
 
 
-async def _safe_delete(bot: Bot, chat_id: int, message_id: int) -> None:
+async def _safe_delete(bot: Bot, chat_id: int, message_id: int) -> tuple[str, bool]:
+    """Delete and count it (groups only). Returns (kind, ok); not ok = no rights, older than 48h or gone."""
+    kind = (store.kind_of(chat_id, message_id) or "other").split(":", 1)[0]
     try:
         await bot.delete_message(chat_id, message_id)
+        ok = True
     except TelegramAPIError:
-        pass  # already gone or older than 48h
+        ok = False
+    if chat_id < 0:
+        store.count_deletion(chat_id, today().isoformat(), kind, ok)
     store.forget(chat_id, message_id)
+    return kind, ok
 
 
 async def _ticker(bot: Bot, chat_id: int, message_id: int, phrase: str, state: dict, shown: list) -> None:
@@ -590,8 +597,17 @@ async def sweeper(bot: Bot) -> None:
             hours = cleanup_hours(chat_id)
             if hours:
                 store.expire_older_than(chat_id, time.time() - hours * 3600, time.time())
+        report: dict[int, list] = {}  # chat -> [Counter of deleted kinds, failed count]
         for chat_id, message_id in store.due_for_delete(time.time()):
-            await _safe_delete(bot, chat_id, message_id)
+            kind, ok = await _safe_delete(bot, chat_id, message_id)
+            entry = report.setdefault(chat_id, [Counter(), 0])
+            if ok:
+                entry[0][kind] += 1
+            else:
+                entry[1] += 1
+        for chat_id, (kinds, failed) in report.items():
+            detail = ", ".join(f"{k} {n}" for k, n in kinds.most_common())
+            log.info("cleanup chat %s: deleted %d (%s), failed %d", chat_id, sum(kinds.values()), detail or "-", failed)
         for chat_id, key, message_id, options in store.due_tie_polls(time.time()):
             await close_tie_poll(bot, chat_id, key, message_id, options)
         for duel_id, chat_id, message_id in store.stale_duels(time.time() - DUEL_TTL):
